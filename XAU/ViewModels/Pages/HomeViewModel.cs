@@ -963,7 +963,7 @@ namespace XAU.ViewModels.Pages
                 EventsLog($"OAuth SISU response fields: user={(!string.IsNullOrWhiteSpace(userToken))}, title={(!string.IsNullOrWhiteSpace(titleToken))}, device={(!string.IsNullOrWhiteSpace(returnedDeviceToken))}, authorization={(!string.IsNullOrWhiteSpace(sisuResult.AuthorizationToken?.Token))}");
 
                 var authorizationToken = sisuResult.AuthorizationToken;
-                if (authorizationToken == null || !authorizationToken.Validate()
+                if (authorizationToken == null || string.IsNullOrWhiteSpace(authorizationToken.Token)
                     || authorizationToken.XuiClaims == null
                     || string.IsNullOrWhiteSpace(authorizationToken.XuiClaims.UserHash)
                     || string.IsNullOrWhiteSpace(authorizationToken.XuiClaims.XboxUserId))
@@ -1043,21 +1043,63 @@ namespace XAU.ViewModels.Pages
                     return null;
                 }
 
-                var signedXsts = await xboxSignedClient.RequestSignedXstsToken(new XboxSignedXstsRequest
+                var relyingParties = new[]
                 {
-                    UserToken = userToken,
-                    DeviceToken = returnedDeviceToken,
-                    TitleToken = titleToken,
-                    RelyingParty = XboxAuthConstants.XboxUserPresenceRelyingParty
-                });
+                    XboxAuthConstants.XboxUserPresenceRelyingParty,
+                    "https://userpresence.xboxlive.com",
+                    XboxAuthConstants.XboxLiveRelyingParty
+                };
 
-                if (signedXsts.Validate() && signedXsts.XuiClaims != null
-                    && !string.IsNullOrWhiteSpace(signedXsts.XuiClaims.UserHash))
+                foreach (var relyingParty in relyingParties)
                 {
-                    return $"XBL3.0 x={signedXsts.XuiClaims.UserHash};{signedXsts.Token}";
+                    try
+                    {
+                        var signedXsts = await xboxSignedClient.RequestSignedXstsToken(new XboxSignedXstsRequest
+                        {
+                            UserToken = userToken,
+                            DeviceToken = returnedDeviceToken,
+                            TitleToken = titleToken,
+                            RelyingParty = relyingParty
+                        });
+
+                        if (!string.IsNullOrWhiteSpace(signedXsts.Token)
+                            && signedXsts.XuiClaims != null
+                            && !string.IsNullOrWhiteSpace(signedXsts.XuiClaims.UserHash))
+                        {
+                            EventsLog($"Presence XSTS succeeded with relying party {relyingParty}");
+                            return $"XBL3.0 x={signedXsts.XuiClaims.UserHash};{signedXsts.Token}";
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        EventsLog($"Signed presence XSTS failed for {relyingParty}: {DescribeAuthFailure(ex)}");
+                    }
+
+                    try
+                    {
+                        var unsignedXsts = await xboxSignedClient.RequestXstsToken(new XboxXstsRequest
+                        {
+                            UserToken = userToken,
+                            DeviceToken = returnedDeviceToken,
+                            TitleToken = titleToken,
+                            RelyingParty = relyingParty
+                        });
+
+                        if (!string.IsNullOrWhiteSpace(unsignedXsts.Token)
+                            && unsignedXsts.XuiClaims != null
+                            && !string.IsNullOrWhiteSpace(unsignedXsts.XuiClaims.UserHash))
+                        {
+                            EventsLog($"Unsigned presence XSTS succeeded with relying party {relyingParty}");
+                            return $"XBL3.0 x={unsignedXsts.XuiClaims.UserHash};{unsignedXsts.Token}";
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        EventsLog($"Unsigned presence XSTS failed for {relyingParty}: {DescribeAuthFailure(ex)}");
+                    }
                 }
 
-                EventsLog("Presence XSTS response did not contain a valid XUI claim");
+                EventsLog("Presence XSTS attempts returned no usable XUI claim");
             }
             catch (Exception ex)
             {
