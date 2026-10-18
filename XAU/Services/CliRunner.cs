@@ -18,6 +18,7 @@ namespace XAU.Services;
 //   --sisu-title <id>          title id to ask SISU for (default: the probed game)
 //   --native-device            device token with the native xgameruntime layout
 //   --watch <seconds>          after the steps, log the presence read-back every 15 s
+//   --device-type <name>       device token DeviceType: Win32 (default), WindowsOneCore, iOS, Android, Nintendo
 //   --pace <ms>                delay between probe steps (default 1500)
 //   --stop                     DELETE presence and heartbeat when finished
 //   --exit                     close the app when finished
@@ -31,6 +32,7 @@ public static class CliRunner
         // Set synchronously: the device token is built during login, which can start
         // before the background task below runs.
         HomeViewModel.ForceNativeDevice = Flag(args, "--native-device");
+        HomeViewModel.DeviceTypeOverride = Value(args, "--device-type");
         _ = Task.Run(() => RunAsync(args));
     }
 

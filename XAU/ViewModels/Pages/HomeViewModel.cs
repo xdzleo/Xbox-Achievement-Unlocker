@@ -973,6 +973,15 @@ namespace XAU.ViewModels.Pages
                     throw new InvalidOperationException("OAuth response did not contain an access token");
 
                 XboxAuthResponse deviceTokenResult;
+                var deviceType = XboxDeviceTypes.Win32;
+                var requestedDeviceType = string.IsNullOrWhiteSpace(DeviceTypeOverride) ? Environment.GetEnvironmentVariable("XAU_DEVICE_TYPE") : DeviceTypeOverride;
+                if (!string.IsNullOrWhiteSpace(requestedDeviceType))
+                {
+                    var known = new[] { XboxDeviceTypes.Win32, XboxDeviceTypes.WindowsOneCore, XboxDeviceTypes.iOS, XboxDeviceTypes.Android, XboxDeviceTypes.Nintendo };
+                    var match = known.FirstOrDefault(k => string.Equals(k, requestedDeviceType.Trim(), StringComparison.OrdinalIgnoreCase));
+                    if (match != null) { deviceType = match; EventsLog($"Device token DeviceType override: {deviceType}"); }
+                    else EventsLog("Device token DeviceType override ignored: unknown value");
+                }
                 if (ForceNativeDevice || Environment.GetEnvironmentVariable("XAU_NATIVE_DEVICE") == "1")
                 {
                     var osVersion = NativeDeviceInfo.VersionString(Environment.OSVersion.Version);
@@ -987,14 +996,14 @@ namespace XAU.ViewModels.Pages
                     deviceTokenResult = await xboxSignedClient.RequestDeviceToken(new XboxDeviceTokenRequest
                     {
                         NativeWin32Profile = true,
-                        DeviceType = XboxDeviceTypes.Win32,
+                        DeviceType = deviceType,
                         DeviceVersion = osVersion,
                         Id = NativeDeviceInfo.StableDeviceId(seed)
                     });
                 }
                 else
                 {
-                    deviceTokenResult = await xboxSignedClient.RequestDeviceToken(XboxDeviceTypes.Win32, "0.0.0");
+                    deviceTokenResult = await xboxSignedClient.RequestDeviceToken(deviceType, "0.0.0");
                 }
                 var deviceToken = deviceTokenResult.Token;
                 if (string.IsNullOrWhiteSpace(deviceToken))
@@ -1091,6 +1100,10 @@ namespace XAU.ViewModels.Pages
         // EXPERIMENT: device token with the native xgameruntime layout (see
         // NativeDeviceInfo). Off by default; --native-device or XAU_NATIVE_DEVICE=1.
         public static bool ForceNativeDevice;
+        // EXPERIMENT: DeviceType of the device token (Win32, WindowsOneCore, iOS,
+        // Android, Nintendo). Default Win32. The Xbox App's own presence reports
+        // WindowsOneCore. CLI: --device-type; env XAU_DEVICE_TYPE.
+        public static string? DeviceTypeOverride;
         // Title id the title-bound SISU experiment asks for instead of the game's
         // (e.g. 704208617, the Xbox App's own title). Also read from XAU_SISU_TITLE.
         public static string? SisuTitleOverride;
