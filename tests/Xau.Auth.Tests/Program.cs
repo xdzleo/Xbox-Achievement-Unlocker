@@ -40,8 +40,75 @@ internal static class Program
         await Run("DisplayClaims retains title and sandbox siblings", DisplayClaimsRetainsTitleAndSandbox);
         await Run("numeric XErr is preserved as hexadecimal", NumericXErrIsHexadecimal);
         await Run("header X-Err is converted to hexadecimal", HeaderXErrIsHexadecimal);
+        await Run("state-only presence write is bound only to the token title", StateOnlyPresenceBindsToTokenTitle);
+        await Run("presence readback confirms only the requested active title", PresenceReadbackConfirmsRequestedTitle);
+        await Run("presence readback rejects malformed or foreign bodies", PresenceReadbackRejectsMalformed);
         Console.WriteLine($"PASS: {_passed} offline XboxAuthNet contract tests");
         return 0;
+    }
+
+    // Reproduces the 2026-10-18 15:54 log: the OAuth presence XSTS carries the
+    // OAuth client's title claim, the native state-only body names no title,
+    // and the POST returned 200. That 200 cannot stand for the spoof title.
+    private static Task StateOnlyPresenceBindsToTokenTitle()
+    {
+        const string oauthClientTitle = "1111111111";
+        const string requestedTitle = "2222222222";
+        Assert(PresenceVerification.ClassifyStateOnlyWrite(oauthClientTitle, requestedTitle) == PresenceVerification.StateOnlyBinding.Mismatch,
+            "OAuth client title must not be treated as the requested title");
+        Assert(PresenceVerification.ClassifyStateOnlyWrite("02222222222", requestedTitle) == PresenceVerification.StateOnlyBinding.Bound,
+            "equal UInt64 title ids bind regardless of leading zeroes");
+        Assert(PresenceVerification.ClassifyStateOnlyWrite(null, requestedTitle) == PresenceVerification.StateOnlyBinding.Unknown,
+            "absent token title is unknown, not bound");
+        Assert(PresenceVerification.ClassifyStateOnlyWrite("", requestedTitle) == PresenceVerification.StateOnlyBinding.Unknown,
+            "empty token title is unknown");
+        Assert(PresenceVerification.ClassifyStateOnlyWrite("0x2222", requestedTitle) == PresenceVerification.StateOnlyBinding.Mismatch,
+            "non-decimal token title is a mismatch");
+        foreach (var invalid in new[] { "", "0", "abc", "-1", "18446744073709551616" })
+            Assert(PresenceVerification.ClassifyStateOnlyWrite(requestedTitle, invalid) == PresenceVerification.StateOnlyBinding.Mismatch,
+                $"invalid requested title {invalid} must never bind");
+        return Task.CompletedTask;
+    }
+
+    private static Task PresenceReadbackConfirmsRequestedTitle()
+    {
+        const string body = """
+            {"xuid":"2535400000000000","state":"Online","devices":[
+              {"type":"WindowsOneCore","titles":[
+                {"id":"1111111111","name":"Client","placement":"Background","state":"Active"},
+                {"id":"2222222222","name":"Game","placement":"Full","state":"Active"}]}]}
+            """;
+        var found = PresenceVerification.ParseReadback(body, "2222222222");
+        Assert(found.Parsed && found.RequestedTitleActive && found.TitleCount == 2, "requested active title is confirmed");
+        Assert(found.ActiveTitleIds.SequenceEqual(new[] { "1111111111", "2222222222" }), "active ids are canonical numbers");
+
+        const string clientOnly = """
+            {"devices":[{"titles":[{"id":"1111111111","state":"Active"}]}]}
+            """;
+        var missing = PresenceVerification.ParseReadback(clientOnly, "2222222222");
+        Assert(missing.Parsed && !missing.RequestedTitleActive, "200 for the client title alone is not confirmation");
+
+        const string inactive = """
+            {"devices":[{"titles":[{"id":2222222222,"state":"Inactive"}]}]}
+            """;
+        Assert(!PresenceVerification.ParseReadback(inactive, "2222222222").RequestedTitleActive, "inactive title is not confirmation");
+
+        const string numeric = """
+            {"Devices":[{"Titles":[{"Id":2222222222}]}]}
+            """;
+        Assert(PresenceVerification.ParseReadback(numeric, "2222222222").RequestedTitleActive, "numeric id without state is accepted case-insensitively");
+        return Task.CompletedTask;
+    }
+
+    private static Task PresenceReadbackRejectsMalformed()
+    {
+        foreach (var body in new[] { null, "", "not json", "[]", "{\"devices\":{}}", "{\"devices\":[{\"titles\":[{\"id\":\"abc\"}]}]}" })
+        {
+            var result = PresenceVerification.ParseReadback(body, "2222222222");
+            Assert(!result.RequestedTitleActive, $"body {body ?? "null"} must not confirm presence");
+        }
+        Assert(!PresenceVerification.ParseReadback("{\"devices\":[]}", "0").Parsed, "invalid requested title is not parsed");
+        return Task.CompletedTask;
     }
 
     private static async Task Run(string name, Func<Task> test)

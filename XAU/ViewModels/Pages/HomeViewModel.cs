@@ -101,6 +101,9 @@ namespace XAU.ViewModels.Pages
         // XAUTH. The candidate is accepted only after the presence endpoint returns
         // success; token headers alone cannot reveal the encrypted RP/claims.
         public static string PresenceXAUTH = "";
+        // Title claim (xti.tid) of PresenceXAUTH when it came from an XSTS
+        // response. Empty means unknown (e.g. a token read from process memory).
+        public static string PresenceTitleId = "";
         public static string XUIDOnly;
         public static bool InitComplete = false;
         private bool _isInitialized = false;
@@ -495,6 +498,7 @@ namespace XAU.ViewModels.Pages
             {
                 XAUTH = mostCommon;
                 PresenceXAUTH = mostCommon;
+                PresenceTitleId = "";
                 EventsLog($"Memory XAUTH metadata: {DescribeXauthMetadata(mostCommon)}");
                 XAUTHTested = false;
             }
@@ -980,6 +984,7 @@ namespace XAU.ViewModels.Pages
                 XAUTH = $"XBL3.0 x={authorizationToken.XuiClaims.UserHash};{authorizationToken.Token}";
                 EventsLog($"OAuth normal XAUTH metadata: {DescribeXauthMetadata(XAUTH)}");
                 stage = "presence-xsts";
+                PresenceTitleId = "";
                 PresenceXAUTH = await BuildPresenceXauthAsync(sisuResult, deviceToken, response.AccessToken) ?? "";
                 EventsLog($"OAuth presence token: available={!string.IsNullOrWhiteSpace(PresenceXAUTH)}");
                 if (!string.IsNullOrWhiteSpace(PresenceXAUTH))
@@ -1092,6 +1097,7 @@ namespace XAU.ViewModels.Pages
                                 && TitleClaimMatchesRequestedTitle(signedXsts))
                             {
                                 EventsLog($"Presence XSTS succeeded with relying party {relyingParty}; claims={(claimSet == null ? "base" : "mgt,mgs,umg")}");
+                                RecordPresenceTitle(signedXsts);
                                 return $"XBL3.0 x={signedXsts.XuiClaims.UserHash};{signedXsts.Token}";
                             }
                         }
@@ -1117,6 +1123,7 @@ namespace XAU.ViewModels.Pages
                                 && TitleClaimMatchesRequestedTitle(unsignedXsts))
                             {
                                 EventsLog($"Unsigned presence XSTS succeeded with relying party {relyingParty}; claims={(claimSet == null ? "base" : "mgt,mgs,umg")}");
+                                RecordPresenceTitle(unsignedXsts);
                                 return $"XBL3.0 x={unsignedXsts.XuiClaims.UserHash};{unsignedXsts.Token}";
                             }
                         }
@@ -1135,6 +1142,14 @@ namespace XAU.ViewModels.Pages
             }
 
             return null;
+        }
+
+        private static void RecordPresenceTitle(XboxAuthResponse response)
+        {
+            // Title ids and sandbox names are public identifiers, not secrets.
+            PresenceTitleId = response.XuiClaims?.TitleId ?? "";
+            var sandbox = response.XuiClaims?.Sandbox;
+            EventsLog($"Presence XSTS title claim: tid={(string.IsNullOrWhiteSpace(PresenceTitleId) ? "none" : PresenceTitleId)}; sbx={(string.IsNullOrWhiteSpace(sandbox) ? "none" : sandbox)}");
         }
 
         private static bool TitleClaimMatchesRequestedTitle(XboxAuthResponse? response)

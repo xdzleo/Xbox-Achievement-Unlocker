@@ -23,7 +23,8 @@ namespace XAU.ViewModels.Pages
         private Lazy<XboxRestAPI> _xboxRestAPI = new Lazy<XboxRestAPI>(() => new XboxRestAPI(HomeViewModel.XAUTH));
 
         private XboxRestAPI PresenceApi() => new XboxRestAPI(
-            HomeViewModel.PresenceXAUTH);
+            HomeViewModel.PresenceXAUTH,
+            presenceTokenTitleId: HomeViewModel.PresenceTitleId);
 
 
 

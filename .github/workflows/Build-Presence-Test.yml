@@ -2,7 +2,7 @@ name: Build presence test artifact
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/presence-xsts]
   workflow_dispatch:
 
 permissions:

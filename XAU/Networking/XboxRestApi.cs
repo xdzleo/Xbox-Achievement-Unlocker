@@ -22,10 +22,12 @@ public class XboxRestAPI
     private readonly string? _cloudHint;
     private readonly string? _storeHint;
     private readonly string? _presenceSignature;
+    private readonly string? _presenceTokenTitleId;
 
-    public XboxRestAPI(string xauth, string? cloudHint = null, string? storeHint = null, string? presenceSignature = null)
+    public XboxRestAPI(string xauth, string? cloudHint = null, string? storeHint = null, string? presenceSignature = null, string? presenceTokenTitleId = null)
     {
         _xauth = xauth;
+        _presenceTokenTitleId = presenceTokenTitleId;
         _cloudHint = cloudHint;
         _storeHint = storeHint;
         _presenceSignature = presenceSignature;
@@ -115,23 +117,61 @@ public class XboxRestAPI
             return false;
         }
 
+        // The native xgameruntime current-title writer serializes only
+        // {"state":"active"}; the issued XToken supplies title/sandbox
+        // identity. When the token's title claim is known and differs from the
+        // requested title, a 200 would only mark the token's own title (for
+        // OAuth, the Xbox App client) active, so do not send it as if it were
+        // the requested title.
+        var binding = PresenceVerification.ClassifyStateOnlyWrite(_presenceTokenTitleId, titleId);
+        if (binding == PresenceVerification.StateOnlyBinding.Mismatch)
+        {
+            HomeViewModel.EventsLog($"Presence POST skipped: state-only body binds to token title {(_presenceTokenTitleId ?? "none")}, requested {titleId}");
+            return false;
+        }
+
         try
         {
             SetPresenceHeaders();
-            // The native xgameruntime current-title writer serializes only
-            // {"state":"active"}; the issued XToken supplies title/sandbox
-            // identity. Keep the richer id/placement model as an explicit
-            // fixture/profile, but match the observed native wire by default.
             var body = new PresenceStateRequest();
             var response = await _spooferClient.PostAsync(
                 string.Format(InterpolatedXboxAPIUrls.PresenceUrl, xuid),
                 new StringContent(JsonConvert.SerializeObject(body), Encoding.UTF8, HeaderValues.Accept));
-            HomeViewModel.EventsLog($"Presence POST => {(int)response.StatusCode} {response.StatusCode}; {await DescribeFailureAsync(response)}");
-            return response.IsSuccessStatusCode;
+            HomeViewModel.EventsLog($"Presence POST => {(int)response.StatusCode} {response.StatusCode}; binding={binding}; {await DescribeFailureAsync(response)}");
+            if (!response.IsSuccessStatusCode)
+                return false;
+
+            // A write status is not proof of the requested presence. Confirm
+            // by reading the user's presence back.
+            return await ReadBackPresenceAsync(xuid, titleId);
         }
         catch (HttpRequestException ex)
         {
             HomeViewModel.EventsLog($"Presence POST transport failure: {ex.GetType().Name}");
+            return false;
+        }
+    }
+
+    private async Task<bool> ReadBackPresenceAsync(string xuid, string titleId)
+    {
+        try
+        {
+            SetPresenceHeaders();
+            var response = await _spooferClient.GetAsync(string.Format(InterpolatedXboxAPIUrls.PresenceReadUrl, xuid));
+            if (!response.IsSuccessStatusCode)
+            {
+                HomeViewModel.EventsLog($"Presence readback GET => {(int)response.StatusCode} {response.StatusCode}; {await DescribeFailureAsync(response)}");
+                return false;
+            }
+
+            var result = PresenceVerification.ParseReadback(await response.Content.ReadAsStringAsync(), titleId);
+            var active = result.ActiveTitleIds.Count == 0 ? "none" : string.Join(",", result.ActiveTitleIds);
+            HomeViewModel.EventsLog($"Presence readback: parsed={result.Parsed}; requested={titleId}; requested_active={result.RequestedTitleActive}; titles={result.TitleCount}; active_ids={active}");
+            return result.RequestedTitleActive;
+        }
+        catch (HttpRequestException ex)
+        {
+            HomeViewModel.EventsLog($"Presence readback transport failure: {ex.GetType().Name}");
             return false;
         }
     }
@@ -313,6 +353,8 @@ public class XboxRestAPI
         string.Format(InterpolatedXboxAPIUrls.HeartbeatUrl, xuid),
         new StringContent(JsonConvert.SerializeObject(heartbeatRequest), Encoding.UTF8, HeaderValues.Accept));
         HomeViewModel.EventsLog($"Heartbeat POST => {(int)heartbeatResponse.StatusCode} {heartbeatResponse.StatusCode}; {await DescribeFailureAsync(heartbeatResponse)}");
+        if (heartbeatResponse.IsSuccessStatusCode)
+            await ReadBackPresenceAsync(xuid, spoofedTitleId);
     }
 
     private static async Task<string> DescribeFailureAsync(HttpResponseMessage response)

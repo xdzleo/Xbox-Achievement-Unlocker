@@ -78,6 +78,7 @@ public struct InterpolatedXboxAPIUrls
     public const string UpdateAchievementsUrl = "https://achievements.xboxlive.com/users/xuid({0})/achievements/{1}/update";
     public const string HeartbeatUrl = "https://presence-heartbeat.xboxlive.com/users/xuid({0})/devices/current/";
     public const string PresenceUrl = "https://userpresence.xboxlive.com/users/xuid({0})/devices/current/titles/current";
+    public const string PresenceReadUrl = "https://userpresence.xboxlive.com/users/xuid({0})?level=all";
     public const string GamertagSearch = "https://profile.xboxlive.com/users/gt({0})/profile/settings?settings=GameDisplayPicRaw,Gamerscore,Gamertag";
 }
 

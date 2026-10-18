@@ -1,5 +1,51 @@
 # OAuth presence fix
 
+## Title binding of the state-only write (v0.1.9)
+
+**Observation (user log, 2026-10-18 15:54, v0.1.8 build).** SISU contract 1
+succeeded; the signed presence XSTS was issued for `http://xboxlive.com`
+(`https://xboxlive.com` returned HTTP 400 for both claim sets, signed and
+unsigned); the presence POST of `{"state":"active"}` to
+`userpresence.xboxlive.com/.../devices/current/titles/current` returned
+**200 OK** twice. No heartbeat line follows, because `SendHeartbeatAsync`
+returned on the first presence success. Every earlier POST in the same log
+(05:23-07:15) returned 400 `ArgumentError` with the `id`/`placement` body.
+
+**Observation (source).** OAuth login uses `ClientId = XboxGameTitles.XboxAppPC`
+and runs before a spoof title is chosen. `TitleClaimMatchesRequestedTitle`
+returns `true` when `AutoSpoofedTitleID` is empty, so no mismatch was ever
+logged. The native current-title body (`FUN_180257230`) names no title.
+
+**Inference.** The service accepted the state-only write for the title
+identity carried by the presenting XToken, i.e. the OAuth client title, not the
+game XAU was asked to show. A 200 is consistent with the user still seeing no
+game presence. This is an inference: the token's `xti.tid` was not logged and no
+read-back was performed in that attempt.
+
+**Change.**
+
+1. The presence XSTS title/sandbox claim (`xti.tid`, `sbx`, public ids) is
+   recorded as `HomeViewModel.PresenceTitleId` and logged.
+2. `PresenceVerification.ClassifyStateOnlyWrite` returns `Bound`, `Mismatch` or
+   `Unknown`. A known mismatch skips the state-only POST and falls back to the
+   legacy heartbeat (which carries the title id in its body).
+3. After any 2xx presence POST or heartbeat, XAU reads
+   `GET userpresence.xboxlive.com/users/xuid({xuid})?level=all` (contract 3)
+   and logs `requested_active` plus numeric active title ids. Only a read-back
+   that lists the requested title as active counts as presence success.
+
+**Unknown / boundary.** To make the state-only writer target a game, the
+presenting XToken must carry that game's title identity. The native runtime
+obtains it from the game's own title context through the provider at
+`+0xf0`/slot `+0x50` (`GetTokenAndSignature`), whose concrete implementation is
+not recovered. A generic OAuth client authenticates as its own client title;
+this branch does not and will not synthesize another title's identity. With the
+OAuth token the heartbeat path previously returned 403, so with this build the
+expected OAuth outcome is: POST skipped (mismatch) -> heartbeat 403 -> no
+read-back. With the Xbox App memory token the heartbeat previously returned
+200; the new read-back will show whether the requested title then appears.
+
+
 ## SISU OAuth regression correction
 
 The user's 2026-10-18 log records three `sisu` HTTP 400 failures at
