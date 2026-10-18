@@ -925,16 +925,26 @@ namespace XAU.ViewModels.Pages
 
         private async void GenerateTokens(MicrosoftOAuthResponse response)
         {
-            var deviceToken = await xboxSignedClient.RequestDeviceToken(XboxDeviceTypes.Win32, "0.0.0");
-            var sisuResult = await xboxSignedClient.SisuAuth(new XboxSisuAuthRequest
-            {
-                AccessToken = response.AccessToken,
-                ClientId = XboxGameTitles.XboxAppPC,
-                DeviceToken = deviceToken.Token,
-                RelyingParty = XboxAuthConstants.XboxLiveRelyingParty,
-            });
+            var stage = "device-token";
             try
             {
+                if (string.IsNullOrWhiteSpace(response.AccessToken))
+                    throw new InvalidOperationException("OAuth response did not contain an access token");
+
+                var deviceTokenResult = await xboxSignedClient.RequestDeviceToken(XboxDeviceTypes.Win32, "0.0.0");
+                var deviceToken = deviceTokenResult.Token;
+                if (string.IsNullOrWhiteSpace(deviceToken))
+                    throw new InvalidOperationException("Device token response did not contain a token");
+
+                stage = "sisu";
+                var sisuResult = await xboxSignedClient.SisuAuth(new XboxSisuAuthRequest
+                {
+                    AccessToken = response.AccessToken,
+                    ClientId = XboxGameTitles.XboxAppPC,
+                    DeviceToken = deviceToken,
+                    RelyingParty = XboxAuthConstants.XboxLiveRelyingParty,
+                });
+
                 // SISU returns UserToken, TitleToken and AuthorizationToken.
                 // The latter is sufficient for profile/achievement reads but
                 // is not guaranteed to carry the title/sandbox claims that
@@ -944,13 +954,38 @@ namespace XAU.ViewModels.Pages
                 var userToken = sisuResult.UserToken?.Token;
                 var titleToken = sisuResult.TitleToken?.Token;
                 var returnedDeviceToken = sisuResult.DeviceToken;
+
+                EventsLog($"OAuth SISU response fields: user={(!string.IsNullOrWhiteSpace(userToken))}, title={(!string.IsNullOrWhiteSpace(titleToken))}, device={(!string.IsNullOrWhiteSpace(returnedDeviceToken))}, authorization={(!string.IsNullOrWhiteSpace(sisuResult.AuthorizationToken?.Token))}");
+
+                // Some tenant/account combinations return only AuthorizationToken
+                // from SISU. Reconstruct the title-aware inputs through the same
+                // signed endpoints used by the Xbox Live client instead of silently
+                // downgrading to an XAUTH that cannot pass presence validation.
+                if (string.IsNullOrWhiteSpace(userToken))
+                {
+                    stage = "user-token-fallback";
+                    var userTokenResult = await xboxSignedClient.RequestSignedUserToken(response.AccessToken);
+                    userToken = userTokenResult.Token;
+                }
+
+                if (string.IsNullOrWhiteSpace(titleToken))
+                {
+                    stage = "title-token-fallback";
+                    var titleTokenResult = await xboxSignedClient.RequestTitleToken(response.AccessToken, deviceToken);
+                    titleToken = titleTokenResult.Token;
+                }
+
+                if (string.IsNullOrWhiteSpace(returnedDeviceToken))
+                    returnedDeviceToken = deviceToken;
+
                 if (string.IsNullOrWhiteSpace(userToken)
                     || string.IsNullOrWhiteSpace(titleToken)
                     || string.IsNullOrWhiteSpace(returnedDeviceToken))
                 {
-                    throw new InvalidOperationException("SISU did not return UserToken, TitleToken and DeviceToken required for presence");
+                    throw new InvalidOperationException("Title-aware token inputs are incomplete after SISU and fallback exchange");
                 }
 
+                stage = "final-xsts";
                 var presenceToken = await xboxSignedClient.RequestSignedXstsToken(new XboxSignedXstsRequest
                 {
                     UserToken = userToken,
@@ -960,6 +995,7 @@ namespace XAU.ViewModels.Pages
                     OptionalDisplayClaims = new[] { "xui", "xti" }
                 });
 
+                stage = "claims";
                 if (!presenceToken.Validate() || presenceToken.XuiClaims == null
                     || string.IsNullOrWhiteSpace(presenceToken.XuiClaims.UserHash)
                     || string.IsNullOrWhiteSpace(presenceToken.XuiClaims.XboxUserId))
@@ -987,9 +1023,11 @@ namespace XAU.ViewModels.Pages
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                _snackbarService.Show("Error", "Failed to generate XAUTH", ControlAppearance.Danger, new SymbolIcon(SymbolRegular.ErrorCircle24), _snackbarDuration);
+                var diagnostic = DescribeAuthFailure(ex);
+                EventsLog($"OAuth XAUTH failed at {stage}: {diagnostic}");
+                _snackbarService.Show("Error", $"Failed to generate XAUTH ({stage}). See Documents\\XAU\\events_debug.log", ControlAppearance.Danger, new SymbolIcon(SymbolRegular.ErrorCircle24), _snackbarDuration);
             }
             LoginText = "Logout";
             XauthWorker_ProgressChanged(null, null);
@@ -999,6 +1037,21 @@ namespace XAU.ViewModels.Pages
             // Start the events token worker to periodically check/refresh the token
             if (Settings.AutoGrabEventsToken && !EventsTokenWorker.IsBusy)
                 EventsTokenWorker.RunWorkerAsync();
+        }
+
+        private static string DescribeAuthFailure(Exception ex)
+        {
+            if (ex is XboxAuthException auth)
+            {
+                var xerr = string.IsNullOrWhiteSpace(auth.Error) ? "none" : auth.Error;
+                var message = string.IsNullOrWhiteSpace(auth.ErrorMessage) ? "none" : auth.ErrorMessage;
+                return $"status={auth.StatusCode}; xerr={xerr}; message={message}";
+            }
+
+            // Never write OAuth, device, title, user, or XSTS token material to
+            // the diagnostic file. The exception type and stage are sufficient
+            // to reproduce protocol failures without exposing credentials.
+            return ex.GetType().Name;
         }
         private void ClearProfileState()
         {
