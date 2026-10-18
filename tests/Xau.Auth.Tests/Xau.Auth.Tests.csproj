@@ -17,6 +17,7 @@
     <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Crypto/IXboxRequestSigner.cs" Link="Source/IXboxRequestSigner.cs" />
     <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Responses/XboxAuthResponse.cs" Link="Source/XboxAuthResponse.cs" />
     <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Responses/XboxSisuResponse.cs" Link="Source/XboxSisuResponse.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Responses/XboxSisuContext.cs" Link="Source/XboxSisuContext.cs" />
     <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Responses/XboxAuthResponseHandler.cs" Link="Source/XboxAuthResponseHandler.cs" />
     <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Responses/XboxAuthXuiClaims.cs" Link="Source/XboxAuthXuiClaims.cs" />
     <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Responses/XboxAuthXuiClaimsJsonConverter.cs" Link="Source/XboxAuthXuiClaimsJsonConverter.cs" />

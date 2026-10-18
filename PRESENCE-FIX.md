@@ -1,10 +1,10 @@
 # OAuth presence fix
 
 The OAuth path previously built `XAUTH` directly from SISU's
-`AuthorizationToken`. SISU also returns `UserToken`, `TitleToken`, and a
-device token. Profile and achievement APIs can accept the former bearer while
-the presence service requires the title and sandbox identity claims carried by
-the final XSTS token.
+`AuthorizationToken`. SISU can also return `UserToken`, `TitleToken`, and a
+device token. The explicit XSTS path below is a protocol comparison probe.
+Neither the display claims nor successful profile/achievement requests prove
+which private context makes the Xbox App's presence request succeed.
 
 `HomeViewModel.GenerateTokens` now:
 
@@ -49,7 +49,45 @@ hint and request-signature slots, but never invents their values or treats an
 unrelated XSTS signature as a presence signature.
 
 The SISU request also exposes the native contract-2 fields `TitleId`,
-`SessionId`, `UcsCheckinToken`, `UcsWebToken`, `UserPrompts`, `consent`, and a
+`SessionId`, `UcsCheckinToken`, `UcsWebToken`, `UserPrompts`, `Flow`, and a
 configurable sandbox. The response parser retains sibling `xti.tid` and `sbx`
 claims so the presence path can reject a configured title mismatch. These
 fields remain optional until a provider supplies the corresponding context.
+
+## Response continuation recovered from native code
+
+The retained REA/Ghidra evidence for `FUN_1802a4240` stores response
+`X-SessionId` at operation `+0x238` and `X-Cluster-Affinity` at `+0x258`.
+`FUN_1802a5960` emits a nonempty session as JSON `SessionId` and chooses a
+nonempty affinity as the base for `/authorize`. The source binary SHA-256 is
+`246b0b4de55f4395a78d341fd75d6d4309d16f4a5c76de9c440ea00c3a710d45`.
+See the companion xal-native dossier `evidence/xgr-sisu-context-v2.json`.
+
+`XboxSisuResponse.Context` now retains these headers. A 401 with a nonempty
+JSON `WebPage` remains an error and carries context on that operation's
+`XboxAuthException.SisuContext`. `ContinueFrom(context)` explicitly copies the
+returned values to a subsequent request; there is no automatic browser,
+consent submission or retry. The existing login UI does not yet continue the
+native challenge state machine. Missing headers clear old context, and the
+context is excluded from JSON and exception messages.
+
+The adapter bounds headers to one value and 4096 characters without control
+characters. It accepts affinity routing only to HTTPS port 443 on
+`sisu.xboxlive.com` or a subdomain, with no path, credentials, query or fragment.
+These are **local transport policies**, not recovered Windows rules; no real
+cluster hostname or header value has been observed. Unsupported affinity is
+retained in the response and rejected before continuing or sending secrets.
+HTTP success handling, JSON parsing and native terminal X-Err behavior are
+still a subset; this change does not establish full parser parity.
+
+The UCS group is emitted only when both tokens are nonempty. Within that
+group, `UserPrompts` defaults to an empty array. `RequestConsent=true` emits
+`"Flow":"consent"`: native VA `0x180384918` contains `46 6c 6f 77 00`
+(`Flow`), followed by the literal `consent` at `0x180384920`. The earlier
+`"consent":"consent"` interpretation was incorrect and is removed. Prompt
+ordering/uniqueness and the source of real UCS tokens remain to be closed.
+
+Offline tests use synthetic values to cover response/error isolation,
+continuation, exact signature inputs, rejected endpoints, absent/invalid
+headers, the paired UCS gate and `Flow=consent`. Live presence remains
+unresolved; no DLL completion percentage is increased by these adapter tests.

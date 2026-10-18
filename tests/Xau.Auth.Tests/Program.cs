@@ -21,6 +21,14 @@ internal static class Program
         await Run("presence title request uses string title ID and fields", PresenceTitleRequestUsesWireShape);
         await Run("native presence request uses state-only body", NativePresenceStateRequestUsesWireShape);
         await Run("SISU native contract is version 2 and keeps optional fields", SisuNativeContractAndFields);
+        await Run("SISU response retains operation-local continuation", SisuResponseRetainsContinuation);
+        await Run("SISU challenge retains context without becoming success", SisuChallengeRetainsContext);
+        await Run("SISU errors without WebPage have no continuation", SisuErrorsWithoutWebPage);
+        await Run("SISU continuation clears missing fields", SisuContinuationClearsMissingFields);
+        await Run("SISU affinity rejects unrelated endpoints atomically", SisuAffinityRejectsUnrelatedEndpoints);
+        await Run("SISU partial UCS context and empty session are omitted", SisuPartialContextIsOmitted);
+        await Run("SISU header bounds reject malformed context", SisuContextBounds);
+        await Run("shared response handler keeps concurrent contexts separate", SisuConcurrentContextsAreSeparate);
         await Run("DisplayClaims retains title and sandbox siblings", DisplayClaimsRetainsTitleAndSandbox);
         await Run("numeric XErr is preserved as hexadecimal", NumericXErrIsHexadecimal);
         await Run("header X-Err is converted to hexadecimal", HeaderXErrIsHexadecimal);
@@ -155,7 +163,7 @@ internal static class Program
             UcsCheckinToken = "checkin",
             UcsWebToken = "web",
             UserPrompts = new[] { "a" },
-            Consent = "consent"
+            RequestConsent = true
         }.Send(client, signer);
         Assert(handler.Request!.Headers.GetValues("x-xbl-contract-version").Single() == "2", "SISU native contract must be 2");
         using var body = JsonDocument.Parse(handler.Body!);
@@ -164,7 +172,173 @@ internal static class Program
         Assert(root.GetProperty("SessionId").GetString() == "session", "SISU session id missing");
         Assert(root.GetProperty("UcsCheckinToken").GetString() == "checkin", "SISU UCS checkin missing");
         Assert(root.GetProperty("UcsWebToken").GetString() == "web", "SISU UCS web token missing");
-        Assert(root.GetProperty("consent").GetString() == "consent", "SISU consent key missing");
+        Assert(root.GetProperty("Flow").GetString() == "consent", "SISU Flow=consent missing");
+        Assert(!root.TryGetProperty("consent", out _), "consent is a value, not the native JSON key");
+    }
+
+    private static HttpResponseMessage SisuResponse(HttpStatusCode status, string body,
+        string? session = "synthetic-session", string? cluster = "https://cluster.sisu.xboxlive.com")
+    {
+        var response = new HttpResponseMessage(status) { Content = new StringContent(body) };
+        if (session != null) response.Headers.TryAddWithoutValidation("x-sessionid", session);
+        if (cluster != null) response.Headers.TryAddWithoutValidation("X-Cluster-Affinity", cluster);
+        return response;
+    }
+
+    private static async Task SisuResponseRetainsContinuation()
+    {
+        using var response = SisuResponse(HttpStatusCode.OK, "{\"UserToken\":{\"Token\":\"u\"},\"TitleToken\":{\"Token\":\"t\"}}");
+        var result = await new XboxAuthResponseHandler().HandleResponse<XboxSisuResponse>(response);
+        Assert(result.Context?.SessionId == "synthetic-session", "session header discarded");
+        Assert(result.Context?.ClusterAffinity == "https://cluster.sisu.xboxlive.com", "affinity header discarded");
+        Assert(!JsonSerializer.Serialize(result).Contains("synthetic-session"), "continuation leaked into response JSON");
+        var request = new XboxSisuAuthRequest { AccessToken = "access" };
+        request.ContinueFrom(result.Context!);
+        var transport = new CaptureHandler("{}");
+        using var client = new HttpClient(transport);
+        var signer = new RecordingSigner(new { alg = "ES256" });
+        await request.Send(client, signer);
+        Assert(transport.Request!.RequestUri!.AbsoluteUri == "https://cluster.sisu.xboxlive.com/authorize", "affinity not used");
+        Assert(signer.RequestUri == transport.Request.RequestUri.AbsoluteUri, "signature URL differs from destination");
+        Assert(signer.Body == transport.Body, "signature body differs from wire body");
+        using var json = JsonDocument.Parse(transport.Body!);
+        Assert(json.RootElement.GetProperty("SessionId").GetString() == "synthetic-session", "continuation body lost session");
+        Assert(!json.RootElement.TryGetProperty("ClusterAffinity", out _), "routing context entered body");
+    }
+
+    private static async Task SisuChallengeRetainsContext()
+    {
+        using var response = SisuResponse(HttpStatusCode.Unauthorized, "{\"WebPage\":\"https://example.invalid/consent\"}");
+        try
+        {
+            await new XboxAuthResponseHandler().HandleResponse<XboxSisuResponse>(response);
+            throw new InvalidOperationException("401 challenge became success");
+        }
+        catch (XboxAuthException error)
+        {
+            Assert(error.StatusCode == 401, "challenge status discarded");
+            Assert(error.SisuContext?.SessionId == "synthetic-session", "challenge lost operation context");
+            Assert(!error.Message.Contains("synthetic-session"), "context entered error message");
+        }
+    }
+
+    private static async Task SisuErrorsWithoutWebPage()
+    {
+        foreach (var item in new[] {
+            (HttpStatusCode.Unauthorized, "{}"),
+            (HttpStatusCode.Unauthorized, "{\"WebPage\":\"\"}"),
+            (HttpStatusCode.Unauthorized, "{\"WebPage\":42}"),
+            (HttpStatusCode.Forbidden, "{\"WebPage\":\"page\"}"),
+            (HttpStatusCode.Unauthorized, "not-json") })
+        {
+            using var response = SisuResponse(item.Item1, item.Item2);
+            try
+            {
+                await new XboxAuthResponseHandler().HandleResponse<XboxSisuResponse>(response);
+                throw new InvalidOperationException("error became success");
+            }
+            catch (XboxAuthException error)
+            {
+                Assert(error.StatusCode == (int)item.Item1, "HTTP error status changed");
+                Assert(error.SisuContext == null, "nonchallenge captured continuation");
+            }
+        }
+    }
+
+    private static async Task SisuContinuationClearsMissingFields()
+    {
+        using var first = SisuResponse(HttpStatusCode.OK, "{}");
+        using var empty = SisuResponse(HttpStatusCode.OK, "{}", null, null);
+        var parser = new XboxAuthResponseHandler();
+        var request = new XboxSisuAuthRequest { AccessToken = "access" };
+        request.ContinueFrom((await parser.HandleResponse<XboxSisuResponse>(first)).Context!);
+        request.ContinueFrom((await parser.HandleResponse<XboxSisuResponse>(empty)).Context!);
+        Assert(request.SessionId == null && request.ClusterAffinity == null, "missing response fields reused old context");
+        var transport = new CaptureHandler("{}");
+        using var client = new HttpClient(transport);
+        await request.Send(client, new RecordingSigner(new { alg = "ES256" }));
+        Assert(transport.Request!.RequestUri!.Host == "sisu.xboxlive.com", "missing affinity did not restore default route");
+        using var body = JsonDocument.Parse(transport.Body!);
+        Assert(!body.RootElement.TryGetProperty("SessionId", out _), "missing session serialized");
+    }
+
+    private static async Task SisuAffinityRejectsUnrelatedEndpoints()
+    {
+        foreach (var endpoint in new[] { "https://example.invalid", "http://sisu.xboxlive.com",
+            "https://sisu.xboxlive.com.example.invalid", "https://sisu.xboxlive.com:444",
+            "https://user@sisu.xboxlive.com", "https://sisu.xboxlive.com/path",
+            "https://sisu.xboxlive.com/?q=1", "https://sisu.xboxlive.com/#fragment" })
+        {
+            using var response = SisuResponse(HttpStatusCode.OK, "{}", "new-session", endpoint);
+            var context = (await new XboxAuthResponseHandler().HandleResponse<XboxSisuResponse>(response)).Context!;
+            var request = new XboxSisuAuthRequest { SessionId = "old-session" };
+            try
+            {
+                request.ContinueFrom(context);
+                throw new Exception("unrelated endpoint accepted");
+            }
+            catch (InvalidOperationException)
+            {
+                Assert(request.SessionId == "old-session" && request.ClusterAffinity == null, "rejected continuation partly mutated request");
+            }
+        }
+    }
+
+    private static async Task SisuPartialContextIsOmitted()
+    {
+        foreach (var item in new[] { ("checkin", (string?)null), ((string?)null, "web"), ("", "web") })
+        {
+            var transport = new CaptureHandler("{}");
+            using var client = new HttpClient(transport);
+            await new XboxSisuAuthRequest {
+                AccessToken = "access", SessionId = "", UcsCheckinToken = item.Item1,
+                UcsWebToken = item.Item2, UserPrompts = new[] { "prompt" }, RequestConsent = true
+            }.Send(client, new RecordingSigner(new { alg = "ES256" }));
+            using var body = JsonDocument.Parse(transport.Body!);
+            foreach (var key in new[] { "SessionId", "UcsCheckinToken", "UcsWebToken", "UserPrompts", "Flow" })
+                Assert(!body.RootElement.TryGetProperty(key, out _), "partial context emitted " + key);
+        }
+        var paired = new CaptureHandler("{}");
+        using var pairedClient = new HttpClient(paired);
+        await new XboxSisuAuthRequest { AccessToken = "access", UcsCheckinToken = "c", UcsWebToken = "w" }
+            .Send(pairedClient, new RecordingSigner(new { alg = "ES256" }));
+        using var pairedBody = JsonDocument.Parse(paired.Body!);
+        Assert(pairedBody.RootElement.GetProperty("UserPrompts").GetArrayLength() == 0, "paired context requires prompts array");
+        Assert(!pairedBody.RootElement.TryGetProperty("Flow", out _), "consent flow invented without request");
+    }
+
+    private static Task SisuContextBounds()
+    {
+        foreach (var values in new[] { new[] { "a", "b" }, new[] { new string('x', 4097) }, new[] { "a\tb" } })
+        {
+            using var response = SisuResponse(HttpStatusCode.OK, "{}", null, null);
+            response.Headers.TryAddWithoutValidation("X-SessionId", values);
+            try
+            {
+                XboxSisuContext.FromHeaders(response.Headers);
+                throw new InvalidOperationException("invalid context accepted");
+            }
+            catch (JsonException error)
+            {
+                Assert(error.Message == "Invalid SISU X-SessionId header", "invalid context appeared in error message");
+            }
+        }
+        return Task.CompletedTask;
+    }
+
+    private static async Task SisuConcurrentContextsAreSeparate()
+    {
+        var parser = new XboxAuthResponseHandler();
+        async Task<XboxSisuContext?> Parse(string id)
+        {
+            using var response = SisuResponse(HttpStatusCode.Unauthorized, "{\"WebPage\":\"page\"}", id);
+            response.Content = new YieldingContent("{\"WebPage\":\"page\"}");
+            try { await parser.HandleResponse<XboxSisuResponse>(response); }
+            catch (XboxAuthException error) { return error.SisuContext; }
+            throw new InvalidOperationException("challenge became success");
+        }
+        var results = await Task.WhenAll(Parse("session-a"), Parse("session-b"));
+        Assert(results[0]?.SessionId == "session-a" && results[1]?.SessionId == "session-b", "operation contexts mixed");
     }
 
     private static Task DisplayClaimsRetainsTitleAndSandbox()
@@ -231,6 +405,18 @@ internal static class Program
             Token = token;
             Body = body;
             return "synthetic-signature";
+        }
+    }
+
+    private sealed class YieldingContent : HttpContent
+    {
+        private readonly byte[] _bytes;
+        public YieldingContent(string value) => _bytes = Encoding.UTF8.GetBytes(value);
+        protected override bool TryComputeLength(out long length) { length = _bytes.Length; return true; }
+        protected override async Task SerializeToStreamAsync(System.IO.Stream stream, TransportContext? context)
+        {
+            await Task.Yield();
+            await stream.WriteAsync(_bytes);
         }
     }
 

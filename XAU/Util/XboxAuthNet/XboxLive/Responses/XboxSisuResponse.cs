@@ -4,6 +4,9 @@ namespace XboxAuthNet.XboxLive.Responses
 {
     public class XboxSisuResponse
     {
+        [JsonIgnore]
+        public XboxSisuContext? Context { get; internal set; }
+
         [JsonPropertyName("DeviceToken")]
         public string? DeviceToken { get; set; }
 

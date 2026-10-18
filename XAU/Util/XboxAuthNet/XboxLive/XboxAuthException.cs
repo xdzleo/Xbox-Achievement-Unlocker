@@ -20,6 +20,9 @@ namespace XboxAuthNet.XboxLive
         }
 
         public int StatusCode { get; private set; }
+        // Operation-local continuation data; never included in Message or JSON.
+        [System.Text.Json.Serialization.JsonIgnore]
+        public XboxSisuContext? SisuContext { get; internal set; }
         public string? Error { get; private set; } // refer ErrorCodes.cs
 
         public string? ErrorMessage { get; private set; }
