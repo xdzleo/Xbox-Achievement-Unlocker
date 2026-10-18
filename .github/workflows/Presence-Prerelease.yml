@@ -1,0 +1,50 @@
+name: Presence test pre-release
+
+on:
+  push:
+    tags: ['v0.*']
+
+permissions:
+  contents: write
+
+jobs:
+  prerelease:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore /p:EnableWindowsTargeting=true
+
+      - name: Run offline XboxAuthNet contract tests
+        run: dotnet run --project tests/Xau.Auth.Tests/Xau.Auth.Tests.csproj -c Release
+
+      - name: Publish test build
+        run: dotnet publish XAU.sln -c Release -r win-x64 --self-contained false /p:PublishSingleFile=true /p:PublishReadyToRun=false /p:IncludeAllContentForSelfExtract=true /p:EnableWindowsTargeting=true -o ./presence-test-publish
+
+      - name: Create pre-release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $zip = "XAU-$tag-win-x64-${{ github.run_id }}.zip"
+          Compress-Archive -Path presence-test-publish/* -DestinationPath $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $notes = @"
+          Presence test build from ${{ github.sha }}.
+
+          Signs presence, read-back and heartbeat calls with the ProofKey the
+          presence XSTS was issued to (native Signature header, NSAL policy 0).
+          Live presence is not yet confirmed; see PRESENCE-FIX.md.
+
+          $zip SHA-256: $hash
+          "@
+          gh release create $tag $zip --repo "$env:GITHUB_REPOSITORY" --prerelease --title $tag --notes $notes --verify-tag
