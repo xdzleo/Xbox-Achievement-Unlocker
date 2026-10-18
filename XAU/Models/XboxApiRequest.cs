@@ -50,7 +50,10 @@ public class TitleRequest
 
 public class PresenceTitleRequest
 {
-    public uint id { get; set; }
+    // The wire contract models title IDs as strings. Keep the original value
+    // so leading zeroes and IDs outside UInt32 are not changed by JSON
+    // number conversion.
+    public string? id { get; set; }
     public string state { get; set; } = "active";
     public string placement { get; set; } = "full";
 }
