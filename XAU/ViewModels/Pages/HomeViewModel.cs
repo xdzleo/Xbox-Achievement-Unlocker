@@ -1148,7 +1148,9 @@ namespace XAU.ViewModels.Pages
                     x5t = (string?)header["x5t"] ?? (string?)header["kid"] ?? "none";
                 }
 
-                return $"length={token.Length}; segments={segments.Length}; x5t={x5t}";
+                var fingerprint = Convert.ToHexString(
+                    SHA256.HashData(Encoding.UTF8.GetBytes(token)))[..16];
+                return $"length={token.Length}; segments={segments.Length}; x5t={x5t}; fingerprint={fingerprint}";
             }
             catch
             {
