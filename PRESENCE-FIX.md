@@ -24,6 +24,14 @@ and the same sandbox used by the Xbox App. The test should record only HTTP
 status, XErr, response headers, and non-sensitive claim presence. It must not
 save or publish the bearer token.
 
+The latest wire correction keeps `TitleRequest.id` as a JSON string. The
+published REST contract declares this property as `String`; the previous
+`UInt32` model silently changed values such as `0012345678` to `12345678`.
+The local sanitized diagnostic log recorded `ArgumentError` responses from
+the presence POST, so this change is a controlled body-shape probe rather than
+a claim that the private Xbox App token has been reproduced. Offline contract
+tests cover the exact string serialization and preserve leading zeroes.
+
 The Xbox App's native `XboxAuthManager` also initializes through a separate
 WinRT capability boundary (`RequiredUcsConsents` values `1`, `2`, `3`,
 `EnablePresence`, and `EnableSpop`). This branch does not pretend to call that
