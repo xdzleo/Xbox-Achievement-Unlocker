@@ -1049,6 +1049,11 @@ namespace XAU.ViewModels.Pages
 
                 var relyingParties = new[]
                 {
+                    // The Xbox App AuthManager uses an HTTPS xboxlive.com
+                    // origin in its native initialization path. Try this
+                    // Xbox-App profile before the legacy HTTP RP, while
+                    // retaining both XSTS wire contracts for comparison.
+                    XboxAuthConstants.XboxAppRelyingParty,
                     XboxAuthConstants.XboxLiveRelyingParty
                 };
 

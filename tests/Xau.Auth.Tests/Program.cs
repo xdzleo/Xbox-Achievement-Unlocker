@@ -16,6 +16,7 @@ internal static class Program
     {
         await Run("signed XSTS serializes and signs exact body", SignedXstsSerializesAndSignsExactBody);
         await Run("unsigned XSTS defaults to xboxlive RP and contract 1", UnsignedXstsDefaultsToXboxLiveRp);
+        await Run("Xbox App presence RP keeps HTTPS candidate separate", XboxAppPresenceRpIsExplicit);
         await Run("unsigned XSTS carries device and title tokens", UnsignedXstsCarriesAllTokenInputs);
         await Run("presence title request uses numeric title ID and fields", PresenceTitleRequestUsesWireShape);
         await Run("numeric XErr is preserved as hexadecimal", NumericXErrIsHexadecimal);
@@ -85,6 +86,13 @@ internal static class Program
         using var body = JsonDocument.Parse(handler.Body!);
         Assert(body.RootElement.GetProperty("RelyingParty").GetString() == XboxAuthConstants.XboxLiveRelyingParty, "unsigned default RP changed");
         Assert(body.RootElement.GetProperty("Properties").GetProperty("UserTokens")[0].GetString() == "user-token", "unsigned user token missing");
+    }
+
+    private static Task XboxAppPresenceRpIsExplicit()
+    {
+        Assert(XboxAuthConstants.XboxAppRelyingParty == "https://xboxlive.com", "Xbox App RP candidate changed");
+        Assert(XboxAuthConstants.XboxLiveRelyingParty == "http://xboxlive.com", "legacy RP default changed");
+        return Task.CompletedTask;
     }
 
     private static async Task UnsignedXstsCarriesAllTokenInputs()
