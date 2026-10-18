@@ -1052,54 +1052,66 @@ namespace XAU.ViewModels.Pages
                     XboxAuthConstants.XboxLiveRelyingParty
                 };
 
+                // The Xbox/XAL web-token trace requests these optional modern
+                // gamertag claims. Keep a null set as a second A/B candidate;
+                // the serializer omits it, matching the base XAL request.
+                var claimSets = new string[]?[]
+                {
+                    new[] { "mgt", "mgs", "umg" },
+                    null
+                };
+
                 foreach (var relyingParty in relyingParties)
                 {
-                    try
+                    foreach (var claimSet in claimSets)
                     {
-                        var signedXsts = await xboxSignedClient.RequestSignedXstsToken(new XboxSignedXstsRequest
+                        try
                         {
-                            UserToken = userToken,
-                            DeviceToken = returnedDeviceToken,
-                            TitleToken = titleToken,
-                            RelyingParty = relyingParty,
-                            OptionalDisplayClaims = new[] { "xui", "xti" }
-                        });
+                            var signedXsts = await xboxSignedClient.RequestSignedXstsToken(new XboxSignedXstsRequest
+                            {
+                                UserToken = userToken,
+                                DeviceToken = returnedDeviceToken,
+                                TitleToken = titleToken,
+                                RelyingParty = relyingParty,
+                                OptionalDisplayClaims = claimSet
+                            });
 
-                        if (!string.IsNullOrWhiteSpace(signedXsts.Token)
-                            && signedXsts.XuiClaims != null
-                            && !string.IsNullOrWhiteSpace(signedXsts.XuiClaims.UserHash))
-                        {
-                            EventsLog($"Presence XSTS succeeded with relying party {relyingParty}");
-                            return $"XBL3.0 x={signedXsts.XuiClaims.UserHash};{signedXsts.Token}";
+                            if (!string.IsNullOrWhiteSpace(signedXsts.Token)
+                                && signedXsts.XuiClaims != null
+                                && !string.IsNullOrWhiteSpace(signedXsts.XuiClaims.UserHash))
+                            {
+                                EventsLog($"Presence XSTS succeeded with relying party {relyingParty}; claims={(claimSet == null ? "base" : "mgt,mgs,umg")}");
+                                return $"XBL3.0 x={signedXsts.XuiClaims.UserHash};{signedXsts.Token}";
+                            }
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        EventsLog($"Signed presence XSTS failed for {relyingParty}: {DescribeAuthFailure(ex)}");
-                    }
-
-                    try
-                    {
-                        var unsignedXsts = await xboxSignedClient.RequestXstsToken(new XboxXstsRequest
+                        catch (Exception ex)
                         {
-                            UserToken = userToken,
-                            DeviceToken = returnedDeviceToken,
-                            TitleToken = titleToken,
-                            RelyingParty = relyingParty,
-                            OptionalDisplayClaims = new[] { "xui", "xti" }
-                        });
-
-                        if (!string.IsNullOrWhiteSpace(unsignedXsts.Token)
-                            && unsignedXsts.XuiClaims != null
-                            && !string.IsNullOrWhiteSpace(unsignedXsts.XuiClaims.UserHash))
-                        {
-                            EventsLog($"Unsigned presence XSTS succeeded with relying party {relyingParty}");
-                            return $"XBL3.0 x={unsignedXsts.XuiClaims.UserHash};{unsignedXsts.Token}";
+                            EventsLog($"Signed presence XSTS failed for {relyingParty} ({(claimSet == null ? "base" : "mgt,mgs,umg")}): {DescribeAuthFailure(ex)}");
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        EventsLog($"Unsigned presence XSTS failed for {relyingParty}: {DescribeAuthFailure(ex)}");
+
+                        try
+                        {
+                            var unsignedXsts = await xboxSignedClient.RequestXstsToken(new XboxXstsRequest
+                            {
+                                UserToken = userToken,
+                                DeviceToken = returnedDeviceToken,
+                                TitleToken = titleToken,
+                                RelyingParty = relyingParty,
+                                OptionalDisplayClaims = claimSet
+                            });
+
+                            if (!string.IsNullOrWhiteSpace(unsignedXsts.Token)
+                                && unsignedXsts.XuiClaims != null
+                                && !string.IsNullOrWhiteSpace(unsignedXsts.XuiClaims.UserHash))
+                            {
+                                EventsLog($"Unsigned presence XSTS succeeded with relying party {relyingParty}; claims={(claimSet == null ? "base" : "mgt,mgs,umg")}");
+                                return $"XBL3.0 x={unsignedXsts.XuiClaims.UserHash};{unsignedXsts.Token}";
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            EventsLog($"Unsigned presence XSTS failed for {relyingParty} ({(claimSet == null ? "base" : "mgt,mgs,umg")}): {DescribeAuthFailure(ex)}");
+                        }
                     }
                 }
 
