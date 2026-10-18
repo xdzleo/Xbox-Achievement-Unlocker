@@ -961,6 +961,9 @@ namespace XAU.ViewModels.Pages
                 var titleToken = sisuResult.TitleToken?.Token;
                 var returnedDeviceToken = sisuResult.DeviceToken;
 
+                if (!TitleClaimMatchesRequestedTitle(sisuResult.TitleToken))
+                    EventsLog("SISU TitleToken title identity does not match the configured spoof title; presence token will not be claimed as equivalent");
+
                 EventsLog($"OAuth SISU response fields: user={(!string.IsNullOrWhiteSpace(userToken))}, title={(!string.IsNullOrWhiteSpace(titleToken))}, device={(!string.IsNullOrWhiteSpace(returnedDeviceToken))}, authorization={(!string.IsNullOrWhiteSpace(sisuResult.AuthorizationToken?.Token))}");
 
                 var authorizationToken = sisuResult.AuthorizationToken;
@@ -1083,7 +1086,8 @@ namespace XAU.ViewModels.Pages
 
                             if (!string.IsNullOrWhiteSpace(signedXsts.Token)
                                 && signedXsts.XuiClaims != null
-                                && !string.IsNullOrWhiteSpace(signedXsts.XuiClaims.UserHash))
+                                && !string.IsNullOrWhiteSpace(signedXsts.XuiClaims.UserHash)
+                                && TitleClaimMatchesRequestedTitle(signedXsts))
                             {
                                 EventsLog($"Presence XSTS succeeded with relying party {relyingParty}; claims={(claimSet == null ? "base" : "mgt,mgs,umg")}");
                                 return $"XBL3.0 x={signedXsts.XuiClaims.UserHash};{signedXsts.Token}";
@@ -1107,7 +1111,8 @@ namespace XAU.ViewModels.Pages
 
                             if (!string.IsNullOrWhiteSpace(unsignedXsts.Token)
                                 && unsignedXsts.XuiClaims != null
-                                && !string.IsNullOrWhiteSpace(unsignedXsts.XuiClaims.UserHash))
+                                && !string.IsNullOrWhiteSpace(unsignedXsts.XuiClaims.UserHash)
+                                && TitleClaimMatchesRequestedTitle(unsignedXsts))
                             {
                                 EventsLog($"Unsigned presence XSTS succeeded with relying party {relyingParty}; claims={(claimSet == null ? "base" : "mgt,mgs,umg")}");
                                 return $"XBL3.0 x={unsignedXsts.XuiClaims.UserHash};{unsignedXsts.Token}";
@@ -1128,6 +1133,17 @@ namespace XAU.ViewModels.Pages
             }
 
             return null;
+        }
+
+        private static bool TitleClaimMatchesRequestedTitle(XboxAuthResponse? response)
+        {
+            var requested = AutoSpoofedTitleID;
+            if (string.IsNullOrWhiteSpace(requested) || requested == "0")
+                return true;
+            if (!ulong.TryParse(requested, out var requestedValue))
+                return false;
+            var actual = response?.XuiClaims?.TitleId;
+            return actual != null && ulong.TryParse(actual, out var actualValue) && actualValue == requestedValue;
         }
 
         private static string DescribeAuthFailure(Exception ex)

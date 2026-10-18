@@ -31,5 +31,11 @@ namespace XboxAuthNet.XboxLive.Responses
 
         [JsonPropertyName(XboxAuthXuiClaimNames.Privileges)]
         public string? Privileges { get; set; }
+
+        [JsonIgnore]
+        public string? TitleId { get; set; }
+
+        [JsonIgnore]
+        public string? Sandbox { get; set; }
     }
 }

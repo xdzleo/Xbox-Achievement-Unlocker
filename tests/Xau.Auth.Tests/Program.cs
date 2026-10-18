@@ -19,6 +19,9 @@ internal static class Program
         await Run("Xbox App presence RP keeps HTTPS candidate separate", XboxAppPresenceRpIsExplicit);
         await Run("unsigned XSTS carries device and title tokens", UnsignedXstsCarriesAllTokenInputs);
         await Run("presence title request uses string title ID and fields", PresenceTitleRequestUsesWireShape);
+        await Run("native presence request uses state-only body", NativePresenceStateRequestUsesWireShape);
+        await Run("SISU native contract is version 2 and keeps optional fields", SisuNativeContractAndFields);
+        await Run("DisplayClaims retains title and sandbox siblings", DisplayClaimsRetainsTitleAndSandbox);
         await Run("numeric XErr is preserved as hexadecimal", NumericXErrIsHexadecimal);
         await Run("header X-Err is converted to hexadecimal", HeaderXErrIsHexadecimal);
         Console.WriteLine($"PASS: {_passed} offline XboxAuthNet contract tests");
@@ -124,6 +127,52 @@ internal static class Program
         Assert(root.GetProperty("id").GetString() == "0012345678", "presence title id spelling changed");
         Assert(root.GetProperty("state").GetString() == "active", "presence state changed");
         Assert(root.GetProperty("placement").GetString() == "full", "presence placement changed");
+        return Task.CompletedTask;
+    }
+
+    private static Task NativePresenceStateRequestUsesWireShape()
+    {
+        var json = JsonSerializer.Serialize(new PresenceStateRequest());
+        using var body = JsonDocument.Parse(json);
+        var root = body.RootElement;
+        Assert(root.GetProperty("state").GetString() == "active", "native presence state changed");
+        Assert(root.EnumerateObject().Count() == 1, "native presence body must contain only state");
+        return Task.CompletedTask;
+    }
+
+    private static async Task SisuNativeContractAndFields()
+    {
+        var handler = new CaptureHandler(Json("Token", "sisu-result"));
+        using var client = new HttpClient(handler);
+        var signer = new RecordingSigner(new { alg = "ES256", key = "synthetic-proof-key" });
+        await new XboxSisuAuthRequest
+        {
+            AccessToken = "access",
+            ClientId = "XboxAppPC",
+            DeviceToken = "device",
+            TitleId = "704208617",
+            SessionId = "session",
+            UcsCheckinToken = "checkin",
+            UcsWebToken = "web",
+            UserPrompts = new[] { "a" },
+            Consent = "consent"
+        }.Send(client, signer);
+        Assert(handler.Request!.Headers.GetValues("x-xbl-contract-version").Single() == "2", "SISU native contract must be 2");
+        using var body = JsonDocument.Parse(handler.Body!);
+        var root = body.RootElement;
+        Assert(root.GetProperty("TitleId").GetString() == "704208617", "SISU title id missing");
+        Assert(root.GetProperty("SessionId").GetString() == "session", "SISU session id missing");
+        Assert(root.GetProperty("UcsCheckinToken").GetString() == "checkin", "SISU UCS checkin missing");
+        Assert(root.GetProperty("UcsWebToken").GetString() == "web", "SISU UCS web token missing");
+        Assert(root.GetProperty("consent").GetString() == "consent", "SISU consent key missing");
+    }
+
+    private static Task DisplayClaimsRetainsTitleAndSandbox()
+    {
+        var response = JsonSerializer.Deserialize<XboxAuthResponse>(
+            "{\"DisplayClaims\":{\"xui\":[{\"uhs\":\"u\"}],\"xti\":{\"tid\":\"704208617\"},\"sbx\":\"RETAIL\"},\"Token\":\"t\",\"NotAfter\":\"2999-01-01T00:00:00Z\"}");
+        Assert(response?.XuiClaims?.TitleId == "704208617", "xti.tid was discarded");
+        Assert(response?.XuiClaims?.Sandbox == "RETAIL", "sbx was discarded");
         return Task.CompletedTask;
     }
 

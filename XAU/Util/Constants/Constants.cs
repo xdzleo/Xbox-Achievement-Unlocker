@@ -16,6 +16,8 @@ struct HeaderNames
     public const string Host = @"Host";
     public const string Connection = @"Connection";
     public const string Signature = @"Signature";
+    public const string CloudHint = @"x-xbl-cloud-hint";
+    public const string StoreHint = @"x-xbl-store-hint";
 
 }
 

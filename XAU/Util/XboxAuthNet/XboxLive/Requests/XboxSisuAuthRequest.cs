@@ -13,6 +13,16 @@ namespace XboxAuthNet.XboxLive.Requests
         public string? RelyingParty { get; set; } = XboxAuthConstants.XboxLiveRelyingParty;
         public string? ClientId { get; set; }
         public string? DeviceToken { get; set; }
+        public string? TitleId { get; set; }
+        public string? SessionId { get; set; }
+        public string? UcsCheckinToken { get; set; }
+        public string? UcsWebToken { get; set; }
+        public string[]? UserPrompts { get; set; }
+        public string? Consent { get; set; }
+        public string? Sandbox { get; set; } = "RETAIL";
+
+        // xgameruntime.dll emits contract 2 for the native SISU serializer.
+        protected override string ContractVersion => "2";
 
         protected override string RequestUrl => "https://sisu.xboxlive.com/authorize";
         protected override object BuildBody(object proofKey)
@@ -27,10 +37,16 @@ namespace XboxAuthNet.XboxLive.Requests
                 AccessToken = TokenPrefix + AccessToken,
                 AppId = ClientId,
                 DeviceToken = DeviceToken,
-                Sandbox = "RETAIL",
+                TitleId = TitleId,
+                Sandbox = Sandbox,
                 UseModernGamertag = true,
                 SiteName = "user.auth.xboxlive.com",
                 RelyingParty = RelyingParty,
+                SessionId = SessionId,
+                UcsCheckinToken = UcsCheckinToken,
+                UcsWebToken = UcsWebToken,
+                UserPrompts = UserPrompts,
+                consent = Consent,
                 ProofKey = proofKey
             };
         }

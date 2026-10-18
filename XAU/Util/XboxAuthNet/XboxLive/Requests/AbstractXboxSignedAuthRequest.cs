@@ -12,6 +12,7 @@ public abstract class AbstractXboxSignedAuthRequest
     public XboxAuthResponseHandler ResponseHandler { get; set; } = new();
     protected abstract string RequestUrl { get; }
     protected virtual string Token { get; } = "";
+    protected virtual string ContractVersion => "1";
 
     public async Task<T> Send<T>(HttpClient httpClient, IXboxRequestSigner signer)
     {
@@ -43,7 +44,7 @@ public abstract class AbstractXboxSignedAuthRequest
         // Xbox authentication endpoints reject signed requests without the
         // protocol contract header. The unsigned base request already adds
         // this header; signed requests must carry the same version explicitly.
-        req.Headers.Add("x-xbl-contract-version", "1");
+        req.Headers.Add("x-xbl-contract-version", ContractVersion);
         CommonRequestHeaders.AddDefaultHeaders(req);
         return req;
     }

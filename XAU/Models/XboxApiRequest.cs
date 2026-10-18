@@ -58,6 +58,15 @@ public class PresenceTitleRequest
     public string placement { get; set; } = "full";
 }
 
+// XboxPcApp/xgameruntime's current-title writer emits only the state field;
+// title identity and placement are carried by the issued XToken context.
+// Keep this wire shape separate from PresenceTitleRequest so the documented
+// rich-body profile remains available for an explicit A/B probe.
+public class PresenceStateRequest
+{
+    public string state { get; set; } = "active";
+}
+
 public class GamepassProductsRequest
 {
     public List<string> Products { get; set; } = new List<string>();

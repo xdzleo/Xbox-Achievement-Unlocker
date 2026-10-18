@@ -40,3 +40,16 @@ is whether the returned XSTS contains the title/sandbox claims accepted by
 `userpresence`. Build on Windows with the repository's .NET 9 SDK and run the
 OAuth login, profile/achievement read, presence POST, presence readback, and
 presence DELETE sequence.
+
+The direct `xgameruntime.dll` comparison adds another wire-parity probe: the
+native current-title writer emits the state-only body `{"state":"active"}`.
+XAU now uses that body by default; the richer `id`/`placement` model remains
+available as a separate fixture. The transport exposes optional cloud/store
+hint and request-signature slots, but never invents their values or treats an
+unrelated XSTS signature as a presence signature.
+
+The SISU request also exposes the native contract-2 fields `TitleId`,
+`SessionId`, `UcsCheckinToken`, `UcsWebToken`, `UserPrompts`, `consent`, and a
+configurable sandbox. The response parser retains sibling `xti.tid` and `sbx`
+claims so the presence path can reject a configured title mismatch. These
+fields remain optional until a provider supplies the corresponding context.

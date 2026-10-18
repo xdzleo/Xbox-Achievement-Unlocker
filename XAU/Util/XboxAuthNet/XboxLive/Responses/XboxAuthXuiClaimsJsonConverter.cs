@@ -12,6 +12,8 @@ namespace XboxAuthNet.XboxLive.Responses
                 return null;
 
             XboxAuthXuiClaims? claims = null;
+            string? titleId = null;
+            string? sandbox = null;
 
             while (reader.Read())
             {
@@ -28,10 +30,38 @@ namespace XboxAuthNet.XboxLive.Responses
                     reader.Read();
                     claims = readXui(ref reader, options);
                 }
+                else if (propName == "xti")
+                {
+                    reader.Read();
+                    if (reader.TokenType == JsonTokenType.StartObject)
+                    {
+                        using var xti = JsonDocument.ParseValue(ref reader);
+                        if (xti.RootElement.TryGetProperty("tid", out var tid)
+                            && tid.ValueKind == JsonValueKind.String)
+                            titleId = tid.GetString();
+                    }
+                    else
+                        reader.Skip();
+                }
+                else if (propName == "sbx")
+                {
+                    reader.Read();
+                    if (reader.TokenType == JsonTokenType.String)
+                        sandbox = reader.GetString();
+                    else
+                        reader.Skip();
+                }
                 else
                     reader.Skip();
             }
 
+            if (claims == null && (titleId != null || sandbox != null))
+                claims = new XboxAuthXuiClaims();
+            if (claims != null)
+            {
+                claims.TitleId = titleId;
+                claims.Sandbox = sandbox;
+            }
             return claims;
         }
 

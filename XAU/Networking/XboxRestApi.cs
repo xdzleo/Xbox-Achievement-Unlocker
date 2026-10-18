@@ -19,10 +19,16 @@ public class XboxRestAPI
     // User specifics
     private readonly string _xauth;
     private readonly string _requestedResponseLanguage;
+    private readonly string? _cloudHint;
+    private readonly string? _storeHint;
+    private readonly string? _presenceSignature;
 
-    public XboxRestAPI(string xauth)
+    public XboxRestAPI(string xauth, string? cloudHint = null, string? storeHint = null, string? presenceSignature = null)
     {
         _xauth = xauth;
+        _cloudHint = cloudHint;
+        _storeHint = storeHint;
+        _presenceSignature = presenceSignature;
         _requestedResponseLanguage = HomeViewModel.Settings.RegionOverride ? "en-GB" : System.Globalization.CultureInfo.CurrentCulture.Name;
         var handler = new HttpClientHandler()
         {
@@ -84,6 +90,14 @@ public class XboxRestAPI
         _spooferClient.DefaultRequestHeaders.Add(HeaderNames.ContractVersion, HeaderValues.ContractVersion3);
         _spooferClient.DefaultRequestHeaders.Add(HeaderNames.AcceptLanguage, _requestedResponseLanguage);
         _spooferClient.DefaultRequestHeaders.Add(HeaderNames.Accept, HeaderValues.Accept);
+        if (!string.IsNullOrWhiteSpace(_cloudHint))
+            _spooferClient.DefaultRequestHeaders.Add(HeaderNames.CloudHint, _cloudHint);
+        if (!string.IsNullOrWhiteSpace(_storeHint))
+            _spooferClient.DefaultRequestHeaders.Add(HeaderNames.StoreHint, _storeHint);
+        // The native provider supplies this only when a request-bound
+        // signature is available. Do not synthesize one from XBL3.0.
+        if (!string.IsNullOrWhiteSpace(_presenceSignature))
+            _spooferClient.DefaultRequestHeaders.Add(HeaderNames.Signature, _presenceSignature);
     }
 
     private async Task<bool> SendPresenceAsync(string xuid, string titleId)
@@ -104,7 +118,11 @@ public class XboxRestAPI
         try
         {
             SetPresenceHeaders();
-            var body = new PresenceTitleRequest { id = titleId };
+            // The native xgameruntime current-title writer serializes only
+            // {"state":"active"}; the issued XToken supplies title/sandbox
+            // identity. Keep the richer id/placement model as an explicit
+            // fixture/profile, but match the observed native wire by default.
+            var body = new PresenceStateRequest();
             var response = await _spooferClient.PostAsync(
                 string.Format(InterpolatedXboxAPIUrls.PresenceUrl, xuid),
                 new StringContent(JsonConvert.SerializeObject(body), Encoding.UTF8, HeaderValues.Accept));
