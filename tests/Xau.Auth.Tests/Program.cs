@@ -43,6 +43,8 @@ internal static class Program
         await Run("state-only presence write is bound only to the token title", StateOnlyPresenceBindsToTokenTitle);
         await Run("presence readback confirms only the requested active title", PresenceReadbackConfirmsRequestedTitle);
         await Run("presence readback rejects malformed or foreign bodies", PresenceReadbackRejectsMalformed);
+        await Run("title-bound SISU experiment request: contract 2, TitleId, no UCS/session context", TitleBoundSisuExperimentRequest);
+        await Run("title-bound SISU experiment never falls back to OAuth contract or empty title", TitleBoundSisuExperimentRejectsBadTitle);
         await Run("service signature covers method, path+query, Authorization and body", ServiceSignatureCoversRequest);
         await Run("service signature truncates body at policy MaxBodyBytes", ServiceSignatureTruncatesBody);
         await Run("auth signature keeps POST and empty token layout", AuthSignatureKeepsLegacyLayout);
@@ -112,6 +114,63 @@ internal static class Program
         }
         Assert(!PresenceVerification.ParseReadback("{\"devices\":[]}", "0").Parsed, "invalid requested title is not parsed");
         return Task.CompletedTask;
+    }
+
+    // Mirrors HomeViewModel.PrepareTitleBoundPresenceAsync's request exactly.
+    private static async Task TitleBoundSisuExperimentRequest()
+    {
+        var handler = new CaptureHandler(Json("Token", "sisu-result"));
+        using var client = new HttpClient(handler);
+        var signer = new RecordingSigner(new { alg = "ES256", key = "synthetic-proof-key" });
+        await new XboxSisuAuthRequest
+        {
+            Profile = XboxSisuProfile.NativeContextV2,
+            AccessToken = "access",
+            ClientId = "000000004424da1f",
+            DeviceToken = "device",
+            TitleId = "0374923716", // canonicalized to the native %llu spelling on the wire
+            RelyingParty = XboxAuthConstants.XboxLiveRelyingParty
+        }.Send(client, signer);
+        Assert(handler.Request!.Headers.GetValues("x-xbl-contract-version").Single() == "2", "experiment must use SISU contract 2");
+        using var body = JsonDocument.Parse(handler.Body!);
+        var root = body.RootElement;
+        Assert(root.GetProperty("TitleId").GetString() == "374923716", "TitleId must be the canonical decimal UInt64");
+        Assert(root.GetProperty("AppId").GetString() == "000000004424da1f", "AppId stays the Xbox App client");
+        Assert(root.GetProperty("Sandbox").GetString() == "RETAIL", "sandbox defaults to RETAIL like native init");
+        var expectedOrder = new[] { "AccessToken", "AppId", "TitleId", "DeviceToken", "Sandbox",
+            "UseModernGamertag", "SiteName", "RelyingParty", "ProofKey" };
+        Assert(root.EnumerateObject().Select(p => p.Name).SequenceEqual(expectedOrder), "experiment SISU field order changed");
+        Assert(handler.Body == signer.Body, "signature input must equal the wire body");
+    }
+
+    private static async Task TitleBoundSisuExperimentRejectsBadTitle()
+    {
+        // Zero is rejected by the experiment gate (native init throws 0x89245108
+        // for TitleId 0); the SISU adapter itself accepts it.
+        foreach (var zero in new[] { "0", "", "abc", "-1", "00", null })
+            Assert(!PresenceVerification.TryCanonicalTitleId(zero, out _), $"gate must reject title '{zero ?? "null"}'");
+        foreach (var title in new[] { "", "abc", "-1", null })
+        {
+            var handler = new CaptureHandler("{}");
+            using var client = new HttpClient(handler);
+            var signer = new RecordingSigner(new { alg = "ES256" });
+            var threw = false;
+            try
+            {
+                await new XboxSisuAuthRequest
+                {
+                    Profile = XboxSisuProfile.NativeContextV2,
+                    AccessToken = "access",
+                    ClientId = "000000004424da1f",
+                    DeviceToken = "device",
+                    TitleId = title,
+                    RelyingParty = XboxAuthConstants.XboxLiveRelyingParty
+                }.Send(client, signer);
+            }
+            catch (InvalidOperationException) { threw = true; }
+            Assert(threw, $"title '{title ?? "null"}' must be rejected before signing");
+            Assert(handler.Request == null && signer.Body == null, $"title '{title ?? "null"}' must not reach the network or signer");
+        }
     }
 
     private sealed class EcdsaPop : IPopCryptoProvider

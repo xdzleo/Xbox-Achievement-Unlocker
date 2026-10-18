@@ -56,7 +56,8 @@ namespace XAU.ViewModels.Pages
                 UseAcrylic = UseAcrylic,
                 PrivacyMode = PrivacyMode,
                 OAuthLogin = OAuthLogin,
-                AutoGrabEventsToken = AutoGrabEventsToken
+                AutoGrabEventsToken = AutoGrabEventsToken,
+                TitleBoundSisuExperiment = HomeViewModel.Settings.TitleBoundSisuExperiment
             };
             string settingsJson = JsonConvert.SerializeObject(settings);
             File.WriteAllText(SettingsFilePath, settingsJson);

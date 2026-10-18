@@ -174,6 +174,9 @@ namespace XAU.ViewModels.Pages
             stopwatch.Start();
             TimeSpan spoofingTime = stopwatch.Elapsed;
             SpoofingText = $"Spoofing {GameName} For: {spoofingTime.ToString(@"hh\:mm\:ss")}";
+            // Opt-in experiment; no-op unless enabled (see HomeViewModel).
+            if (HomeViewModel.PrepareTitleBoundPresence != null)
+                await HomeViewModel.PrepareTitleBoundPresence(CurrentSpoofingID);
             await PresenceApi().SendHeartbeatAsync(HomeViewModel.XUIDOnly, CurrentSpoofingID);
             var i = 0;
             Thread.Sleep(1000);

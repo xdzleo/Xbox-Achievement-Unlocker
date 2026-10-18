@@ -1,5 +1,44 @@
 # OAuth presence fix
 
+## Experiment: title-bound SISU (v0.1.11, opt-in, OFF by default)
+
+**Observation (v0.1.10 log, 2026-10-18 16:27-16:28).** With the request
+signed (`signed=True`), the presence POST returned 200, the read-back listed
+neither the requested title (`requested_active=False`) nor any title of the
+game, the presence XSTS carried `tid=none; sbx=none`, and the heartbeat still
+returned 403.
+
+**Observation (xgameruntime `FUN_1802078c8`, REA evidence
+`ev_982be7c9...`).** XAL GameRuntime initialization takes `clientId`, a
+nonzero `titleId` (else `0x89245108`) and `titleStoreHint` as init arguments;
+the sandbox defaults to `RETAIL`. The title identity therefore enters the
+native auth stack from the hosting title, and the native SISU contract 2
+carries it as `TitleId`. A title-less OAuth login has no equivalent.
+
+**Experiment.** Enabled by `"TitleBoundSisuExperiment": true` in
+`Documents\XAU\settings.json` or the environment variable
+`XAU_TITLE_BOUND_SISU=1`. Before the first presence write for a title (once
+per OAuth session and title) XAU sends SISU `NativeContextV2` (contract 2)
+with `AppId` = the Xbox App client, the same device token, `Sandbox=RETAIL`
+and `TitleId` = the chosen title, rebuilds only the presence token from the
+result and logs:
+
+- `Title-bound SISU experiment: profile=NativeContextV2; contract=2; title_id=...`
+- `Title-bound SISU response: ...; title_token_tid=...`
+- `Title-bound presence token installed for title ...` (or the failure)
+
+The normal XAUTH used for profile and achievements is not touched. Any
+failure keeps the previous presence token; there is no retry with another
+contract or title, and TitleId 0 is never sent.
+
+**Unknown.** Whether the service honors a TitleId that differs from the
+client's registered title is unproven. A previous contract-2 request without
+TitleId returned HTTP 400; this one is untested live. Success means
+`title_token_tid` equals the chosen title AND `Presence readback` reports
+`requested_active=True`; anything else means the service ignored or rejected
+the TitleId. The cloud hint (`x-xbl-cloud-hint`) origin is still unresolved.
+
+
 ## Request signature on presence calls (v0.1.10)
 
 **Observation (Ghidra 12.1.4 via REA, xgameruntime.dll SHA-256

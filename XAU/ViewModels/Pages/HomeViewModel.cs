@@ -108,6 +108,14 @@ namespace XAU.ViewModels.Pages
         // presence XSTS came from the signed request; tokens from the unsigned
         // XSTS path or process memory are not bound to a key XAU holds.
         public static XboxAuthNet.XboxLive.Crypto.XboxRequestSigner? PresenceSigner;
+        // EXPERIMENT (opt-in, off by default): see PrepareTitleBoundPresenceAsync.
+        // Set after an OAuth login; callers invoke it before the first presence
+        // write for a chosen title. Null when no OAuth session is active.
+        public static Func<string, Task>? PrepareTitleBoundPresence;
+        // In-memory only; never written to disk or the event log.
+        private string? _titleSisuAccessToken;
+        private string? _titleSisuDeviceToken;
+        private string? _titleSisuAttemptedTitleId;
         public static string XUIDOnly;
         public static bool InitComplete = false;
         private bool _isInitialized = false;
@@ -953,6 +961,11 @@ namespace XAU.ViewModels.Pages
                 if (string.IsNullOrWhiteSpace(deviceToken))
                     throw new InvalidOperationException("Device token response did not contain a token");
 
+                _titleSisuAccessToken = response.AccessToken;
+                _titleSisuDeviceToken = deviceToken;
+                _titleSisuAttemptedTitleId = null;
+                PrepareTitleBoundPresence = PrepareTitleBoundPresenceAsync;
+
                 stage = "sisu";
                 EventsLog("OAuth SISU request: profile=OAuthCompatibility; contract=1; native_context=False");
                 var sisuResult = await xboxSignedClient.SisuAuth(new XboxSisuAuthRequest
@@ -1031,7 +1044,66 @@ namespace XAU.ViewModels.Pages
                 EventsTokenWorker.RunWorkerAsync();
         }
 
-        private async Task<string?> BuildPresenceXauthAsync(XboxSisuResponse sisuResult, string deviceToken, string oauthAccessToken)
+        private static bool TitleBoundSisuEnabled() =>
+            Settings.TitleBoundSisuExperiment
+            || Environment.GetEnvironmentVariable("XAU_TITLE_BOUND_SISU") == "1";
+
+        // EXPERIMENT. Native XAL init (xgameruntime FUN_1802078c8) requires a
+        // nonzero TitleId and the native SISU contract 2 carries it as "TitleId".
+        // A title-less OAuth login yields a presence XSTS with tid=none. This asks
+        // SISU for the chosen title once per OAuth session and title, rebuilds only
+        // the presence token from the result, and leaves the normal XAUTH alone.
+        // Whether the service honors a TitleId that differs from the client's
+        // registered title is UNPROVEN; any failure keeps the current presence
+        // token. There is no retry with another contract or title.
+        private async Task PrepareTitleBoundPresenceAsync(string titleId)
+        {
+            if (!TitleBoundSisuEnabled())
+                return;
+            // Native init rejects TitleId 0; TryCanonicalTitleId also rejects it.
+            if (!PresenceVerification.TryCanonicalTitleId(titleId, out var numericTitle))
+                return;
+            var canonicalTitle = numericTitle.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (_titleSisuAttemptedTitleId == canonicalTitle)
+                return;
+            _titleSisuAttemptedTitleId = canonicalTitle;
+            if (string.IsNullOrWhiteSpace(_titleSisuAccessToken) || string.IsNullOrWhiteSpace(_titleSisuDeviceToken))
+            {
+                EventsLog("Title-bound SISU experiment skipped: no active OAuth session");
+                return;
+            }
+
+            try
+            {
+                EventsLog($"Title-bound SISU experiment: profile=NativeContextV2; contract=2; title_id={canonicalTitle}");
+                var sisuResult = await xboxSignedClient.SisuAuth(new XboxSisuAuthRequest
+                {
+                    Profile = XboxSisuProfile.NativeContextV2,
+                    AccessToken = _titleSisuAccessToken,
+                    ClientId = XboxGameTitles.XboxAppPC,
+                    DeviceToken = _titleSisuDeviceToken,
+                    TitleId = canonicalTitle,
+                    RelyingParty = XboxAuthConstants.XboxLiveRelyingParty,
+                });
+                var sisuTitleClaim = sisuResult.TitleToken?.XuiClaims?.TitleId;
+                EventsLog($"Title-bound SISU response: user={!string.IsNullOrWhiteSpace(sisuResult.UserToken?.Token)}, title={!string.IsNullOrWhiteSpace(sisuResult.TitleToken?.Token)}, authorization={!string.IsNullOrWhiteSpace(sisuResult.AuthorizationToken?.Token)}; title_token_tid={(string.IsNullOrWhiteSpace(sisuTitleClaim) ? "none" : sisuTitleClaim)}");
+
+                var presenceXauth = await BuildPresenceXauthAsync(sisuResult, _titleSisuDeviceToken, _titleSisuAccessToken, requireTitleMatch: false);
+                if (string.IsNullOrWhiteSpace(presenceXauth))
+                {
+                    EventsLog("Title-bound SISU experiment: no presence token produced; keeping the previous presence token");
+                    return;
+                }
+                PresenceXAUTH = presenceXauth;
+                EventsLog($"Title-bound presence token installed for title {canonicalTitle}: {DescribeXauthMetadata(PresenceXAUTH)}");
+            }
+            catch (Exception ex)
+            {
+                EventsLog($"Title-bound SISU experiment failed: {DescribeAuthFailure(ex)}; keeping the previous presence token");
+            }
+        }
+
+        private async Task<string?> BuildPresenceXauthAsync(XboxSisuResponse sisuResult, string deviceToken, string oauthAccessToken, bool requireTitleMatch = true)
         {
             var userToken = sisuResult.UserToken?.Token;
             var titleToken = sisuResult.TitleToken?.Token;
@@ -1100,7 +1172,7 @@ namespace XAU.ViewModels.Pages
                             if (!string.IsNullOrWhiteSpace(signedXsts.Token)
                                 && signedXsts.XuiClaims != null
                                 && !string.IsNullOrWhiteSpace(signedXsts.XuiClaims.UserHash)
-                                && TitleClaimMatchesRequestedTitle(signedXsts))
+                                && (!requireTitleMatch || TitleClaimMatchesRequestedTitle(signedXsts)))
                             {
                                 EventsLog($"Presence XSTS succeeded with relying party {relyingParty}; claims={(claimSet == null ? "base" : "mgt,mgs,umg")}");
                                 RecordPresenceTitle(signedXsts);
@@ -1128,7 +1200,7 @@ namespace XAU.ViewModels.Pages
                             if (!string.IsNullOrWhiteSpace(unsignedXsts.Token)
                                 && unsignedXsts.XuiClaims != null
                                 && !string.IsNullOrWhiteSpace(unsignedXsts.XuiClaims.UserHash)
-                                && TitleClaimMatchesRequestedTitle(unsignedXsts))
+                                && (!requireTitleMatch || TitleClaimMatchesRequestedTitle(unsignedXsts)))
                             {
                                 EventsLog($"Unsigned presence XSTS succeeded with relying party {relyingParty}; claims={(claimSet == null ? "base" : "mgt,mgs,umg")}");
                                 RecordPresenceTitle(unsignedXsts);
@@ -1224,6 +1296,9 @@ namespace XAU.ViewModels.Pages
             GrabbedProfile = false;
             XAUTH = "";
             PresenceXAUTH = "";
+            PrepareTitleBoundPresence = null;
+            _titleSisuAccessToken = null;
+            _titleSisuDeviceToken = null;
             XUIDOnly = "";
             GamerTag = "Gamertag: Unknown   ";
             Xuid = "XUID: Unknown";
