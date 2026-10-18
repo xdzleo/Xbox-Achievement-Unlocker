@@ -76,6 +76,35 @@ public class XboxRestAPI
 #endif
     }
 
+    private void SetPresenceHeaders()
+    {
+        _spooferClient.DefaultRequestHeaders.Clear();
+        _spooferClient.DefaultRequestHeaders.Add(HeaderNames.Authorization, _xauth);
+        _spooferClient.DefaultRequestHeaders.Add(HeaderNames.ContractVersion, HeaderValues.ContractVersion3);
+        _spooferClient.DefaultRequestHeaders.Add(HeaderNames.AcceptLanguage, _requestedResponseLanguage);
+        _spooferClient.DefaultRequestHeaders.Add(HeaderNames.Accept, HeaderValues.Accept);
+    }
+
+    private async Task<bool> SendPresenceAsync(string xuid, string titleId)
+    {
+        if (!ulong.TryParse(titleId, out var numericTitleId))
+            return false;
+
+        try
+        {
+            SetPresenceHeaders();
+            var body = new PresenceTitleRequest { id = numericTitleId };
+            var response = await _spooferClient.PostAsync(
+                string.Format(InterpolatedXboxAPIUrls.PresenceUrl, xuid),
+                new StringContent(JsonConvert.SerializeObject(body), Encoding.UTF8, HeaderValues.Accept));
+            return response.IsSuccessStatusCode;
+        }
+        catch (HttpRequestException)
+        {
+            return false;
+        }
+    }
+
     private void SetDefaultEventBasedHeaders()
     {
         _eventBasedClient.DefaultRequestHeaders.Clear();
@@ -226,6 +255,11 @@ public class XboxRestAPI
             // Don't send a request if we don't have the details
             return;
         }
+
+        // Presence-scoped XSTS tokens are accepted by the modern endpoint;
+        // keep the legacy heartbeat as a compatibility fallback.
+        if (await SendPresenceAsync(xuid, spoofedTitleId))
+            return;
 
         SetDefaultSpooferHeaders();
         _spooferClient.DefaultRequestHeaders.Add(HeaderNames.ContractVersion, HeaderValues.ContractVersion3);

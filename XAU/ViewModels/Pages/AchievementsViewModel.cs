@@ -38,6 +38,11 @@ namespace XAU.ViewModels.Pages
         // TODO: this needs to be updated if language changes
         private Lazy<XboxRestAPI> _xboxRestAPI = new Lazy<XboxRestAPI>(() => new XboxRestAPI(HomeViewModel.XAUTH));
 
+        private XboxRestAPI PresenceApi() => new XboxRestAPI(
+            string.IsNullOrWhiteSpace(HomeViewModel.PresenceXAUTH)
+                ? HomeViewModel.XAUTH
+                : HomeViewModel.PresenceXAUTH);
+
         public static bool SpoofingUpdate = false;
         private bool IsFiltered = false;
         private bool IsEventBased = false;
@@ -210,7 +215,7 @@ namespace XAU.ViewModels.Pages
 
         public async Task Spoofing()
         {
-            await _xboxRestAPI.Value.SendHeartbeatAsync(HomeViewModel.XUIDOnly, HomeViewModel.AutoSpoofedTitleID);
+            await PresenceApi().SendHeartbeatAsync(HomeViewModel.XUIDOnly, HomeViewModel.AutoSpoofedTitleID);
             var i = 0;
             Thread.Sleep(1000);
             SpoofingUpdate = false;
@@ -218,7 +223,7 @@ namespace XAU.ViewModels.Pages
             {
                 if (i == 300)
                 {
-                    await _xboxRestAPI.Value.SendHeartbeatAsync(HomeViewModel.XUIDOnly, HomeViewModel.AutoSpoofedTitleID);
+                    await PresenceApi().SendHeartbeatAsync(HomeViewModel.XUIDOnly, HomeViewModel.AutoSpoofedTitleID);
                     i = 0;
                 }
                 else

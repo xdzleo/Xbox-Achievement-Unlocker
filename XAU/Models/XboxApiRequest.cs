@@ -48,6 +48,13 @@ public class TitleRequest
     public string sandbox { get; set; } = "RETAIL";
 }
 
+public class PresenceTitleRequest
+{
+    public ulong id { get; set; }
+    public string state { get; set; } = "active";
+    public string placement { get; set; } = "full";
+}
+
 public class GamepassProductsRequest
 {
     public List<string> Products { get; set; } = new List<string>();

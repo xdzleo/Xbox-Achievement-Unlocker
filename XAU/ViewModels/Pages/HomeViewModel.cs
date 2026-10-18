@@ -97,6 +97,10 @@ namespace XAU.ViewModels.Pages
         bool eventsTokenFound = false;
         public static bool XAUTHTested = false;
         public static string XAUTH = "";
+        // Presence uses a separate XSTS relying party. Keep it separate from the
+        // normal profile/achievement XAUTH because the latter can be rejected by
+        // userpresence.xboxlive.com even when reads succeed.
+        public static string PresenceXAUTH = "";
         public static string XUIDOnly;
         public static bool InitComplete = false;
         private bool _isInitialized = false;
@@ -490,6 +494,7 @@ namespace XAU.ViewModels.Pages
             if (highestFrequency > 3)
             {
                 XAUTH = mostCommon;
+                PresenceXAUTH = mostCommon;
                 XAUTHTested = false;
             }
         }
@@ -513,6 +518,8 @@ namespace XAU.ViewModels.Pages
                 IsLoggedIn = true;
                 XAUTHTested = true;
                 InitComplete = true;
+                if (string.IsNullOrWhiteSpace(PresenceXAUTH))
+                    PresenceXAUTH = XAUTH;
 
                 // Start the events token worker to periodically check/refresh the token
                 if (Settings.AutoGrabEventsToken && !EventsTokenWorker.IsBusy)
@@ -945,66 +952,31 @@ namespace XAU.ViewModels.Pages
                     RelyingParty = XboxAuthConstants.XboxLiveRelyingParty,
                 });
 
-                // SISU returns UserToken, TitleToken and AuthorizationToken.
-                // The latter is sufficient for profile/achievement reads but
-                // is not guaranteed to carry the title/sandbox claims that
-                // userpresence validates. Re-issue the final XSTS token with
-                // all three identity tokens and the PoP key, matching the
-                // Xbox App's title-aware path.
+                // SISU returns a normal AuthorizationToken plus optional
+                // UserToken/TitleToken/DeviceToken inputs. Keep the normal
+                // token for profile/achievement reads; presence requires a
+                // second XSTS request scoped to userpresence.xboxlive.com.
                 var userToken = sisuResult.UserToken?.Token;
                 var titleToken = sisuResult.TitleToken?.Token;
                 var returnedDeviceToken = sisuResult.DeviceToken;
 
                 EventsLog($"OAuth SISU response fields: user={(!string.IsNullOrWhiteSpace(userToken))}, title={(!string.IsNullOrWhiteSpace(titleToken))}, device={(!string.IsNullOrWhiteSpace(returnedDeviceToken))}, authorization={(!string.IsNullOrWhiteSpace(sisuResult.AuthorizationToken?.Token))}");
 
-                // Some tenant/account combinations return only AuthorizationToken
-                // from SISU. Reconstruct the title-aware inputs through the same
-                // signed endpoints used by the Xbox Live client instead of silently
-                // downgrading to an XAUTH that cannot pass presence validation.
-                if (string.IsNullOrWhiteSpace(userToken))
+                var authorizationToken = sisuResult.AuthorizationToken;
+                if (authorizationToken == null || !authorizationToken.Validate()
+                    || authorizationToken.XuiClaims == null
+                    || string.IsNullOrWhiteSpace(authorizationToken.XuiClaims.UserHash)
+                    || string.IsNullOrWhiteSpace(authorizationToken.XuiClaims.XboxUserId))
                 {
-                    stage = "user-token-fallback";
-                    var userTokenResult = await xboxSignedClient.RequestSignedUserToken(response.AccessToken);
-                    userToken = userTokenResult.Token;
+                    throw new InvalidOperationException("SISU AuthorizationToken is missing user identity claims");
                 }
 
-                if (string.IsNullOrWhiteSpace(titleToken))
-                {
-                    stage = "title-token-fallback";
-                    var titleTokenResult = await xboxSignedClient.RequestTitleToken(response.AccessToken, deviceToken);
-                    titleToken = titleTokenResult.Token;
-                }
+                XAUTH = $"XBL3.0 x={authorizationToken.XuiClaims.UserHash};{authorizationToken.Token}";
+                stage = "presence-xsts";
+                PresenceXAUTH = await BuildPresenceXauthAsync(sisuResult, deviceToken, response.AccessToken) ?? "";
+                EventsLog($"OAuth presence token: available={!string.IsNullOrWhiteSpace(PresenceXAUTH)}");
 
-                if (string.IsNullOrWhiteSpace(returnedDeviceToken))
-                    returnedDeviceToken = deviceToken;
-
-                if (string.IsNullOrWhiteSpace(userToken)
-                    || string.IsNullOrWhiteSpace(titleToken)
-                    || string.IsNullOrWhiteSpace(returnedDeviceToken))
-                {
-                    throw new InvalidOperationException("Title-aware token inputs are incomplete after SISU and fallback exchange");
-                }
-
-                stage = "final-xsts";
-                var presenceToken = await xboxSignedClient.RequestSignedXstsToken(new XboxSignedXstsRequest
-                {
-                    UserToken = userToken,
-                    DeviceToken = returnedDeviceToken,
-                    TitleToken = titleToken,
-                    RelyingParty = XboxAuthConstants.XboxLiveRelyingParty,
-                    OptionalDisplayClaims = new[] { "xui", "xti" }
-                });
-
-                stage = "claims";
-                if (!presenceToken.Validate() || presenceToken.XuiClaims == null
-                    || string.IsNullOrWhiteSpace(presenceToken.XuiClaims.UserHash)
-                    || string.IsNullOrWhiteSpace(presenceToken.XuiClaims.XboxUserId))
-                {
-                    throw new InvalidOperationException("Final XSTS token is missing user identity claims");
-                }
-
-                XAUTH = $"XBL3.0 x={presenceToken.XuiClaims.UserHash};{presenceToken.Token}";
-                var xui = presenceToken.XuiClaims;
+                var xui = authorizationToken.XuiClaims;
                 XUIDOnly = xui?.XboxUserId ?? "";
                 if (!string.IsNullOrEmpty(XUIDOnly))
                 {
@@ -1039,6 +1011,62 @@ namespace XAU.ViewModels.Pages
                 EventsTokenWorker.RunWorkerAsync();
         }
 
+        private async Task<string?> BuildPresenceXauthAsync(XboxSisuResponse sisuResult, string deviceToken, string oauthAccessToken)
+        {
+            var userToken = sisuResult.UserToken?.Token;
+            var titleToken = sisuResult.TitleToken?.Token;
+            var returnedDeviceToken = string.IsNullOrWhiteSpace(sisuResult.DeviceToken)
+                ? deviceToken
+                : sisuResult.DeviceToken;
+
+            try
+            {
+                if (string.IsNullOrWhiteSpace(userToken))
+                {
+                    var userTokenResult = await xboxSignedClient.RequestSignedUserToken(oauthAccessToken);
+                    userToken = userTokenResult.Token;
+                }
+
+                if (string.IsNullOrWhiteSpace(titleToken))
+                {
+                    // The title endpoint consumes the OAuth RPS ticket and the
+                    // same device token used by SISU.
+                    var titleTokenResult = await xboxSignedClient.RequestTitleToken(oauthAccessToken, returnedDeviceToken);
+                    titleToken = titleTokenResult.Token;
+                }
+
+                if (string.IsNullOrWhiteSpace(userToken)
+                    || string.IsNullOrWhiteSpace(titleToken)
+                    || string.IsNullOrWhiteSpace(returnedDeviceToken))
+                {
+                    EventsLog("Presence XSTS skipped: UserToken, TitleToken or DeviceToken is missing");
+                    return null;
+                }
+
+                var signedXsts = await xboxSignedClient.RequestSignedXstsToken(new XboxSignedXstsRequest
+                {
+                    UserToken = userToken,
+                    DeviceToken = returnedDeviceToken,
+                    TitleToken = titleToken,
+                    RelyingParty = XboxAuthConstants.XboxUserPresenceRelyingParty
+                });
+
+                if (signedXsts.Validate() && signedXsts.XuiClaims != null
+                    && !string.IsNullOrWhiteSpace(signedXsts.XuiClaims.UserHash))
+                {
+                    return $"XBL3.0 x={signedXsts.XuiClaims.UserHash};{signedXsts.Token}";
+                }
+
+                EventsLog("Presence XSTS response did not contain a valid XUI claim");
+            }
+            catch (Exception ex)
+            {
+                EventsLog($"Presence XSTS failed: {DescribeAuthFailure(ex)}");
+            }
+
+            return null;
+        }
+
         private static string DescribeAuthFailure(Exception ex)
         {
             if (ex is XboxAuthException auth)
@@ -1059,6 +1087,7 @@ namespace XAU.ViewModels.Pages
             XAUTHTested = false;
             GrabbedProfile = false;
             XAUTH = "";
+            PresenceXAUTH = "";
             XUIDOnly = "";
             GamerTag = "Gamertag: Unknown   ";
             Xuid = "XUID: Unknown";

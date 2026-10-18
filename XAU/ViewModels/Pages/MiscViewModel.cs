@@ -22,6 +22,11 @@ namespace XAU.ViewModels.Pages
         private TimeSpan _snackbarDuration = TimeSpan.FromSeconds(2);
         private Lazy<XboxRestAPI> _xboxRestAPI = new Lazy<XboxRestAPI>(() => new XboxRestAPI(HomeViewModel.XAUTH));
 
+        private XboxRestAPI PresenceApi() => new XboxRestAPI(
+            string.IsNullOrWhiteSpace(HomeViewModel.PresenceXAUTH)
+                ? HomeViewModel.XAUTH
+                : HomeViewModel.PresenceXAUTH);
+
 
 
         public MiscViewModel(ISnackbarService snackbarService)
@@ -86,7 +91,7 @@ namespace XAU.ViewModels.Pages
                 GameImage = "pack://application:,,,/Assets/cirno.png";
                 GameTime = "Time Played: ";
                 HomeViewModel.SpoofingStatus = 0;
-                await _xboxRestAPI.Value.StopHeartbeatAsync(HomeViewModel.XUIDOnly);
+                await PresenceApi().StopHeartbeatAsync(HomeViewModel.XUIDOnly);
                 return;
             }
             HomeViewModel.SpoofedTitleID = NewSpoofingID;
@@ -169,7 +174,7 @@ namespace XAU.ViewModels.Pages
             stopwatch.Start();
             TimeSpan spoofingTime = stopwatch.Elapsed;
             SpoofingText = $"Spoofing {GameName} For: {spoofingTime.ToString(@"hh\:mm\:ss")}";
-            await _xboxRestAPI.Value.SendHeartbeatAsync(HomeViewModel.XUIDOnly, CurrentSpoofingID);
+            await PresenceApi().SendHeartbeatAsync(HomeViewModel.XUIDOnly, CurrentSpoofingID);
             var i = 0;
             Thread.Sleep(1000);
             SpoofingUpdate = false;
@@ -177,7 +182,7 @@ namespace XAU.ViewModels.Pages
             {
                 if (i == 300)
                 {
-                    await _xboxRestAPI.Value.SendHeartbeatAsync(HomeViewModel.XUIDOnly, CurrentSpoofingID);
+                    await PresenceApi().SendHeartbeatAsync(HomeViewModel.XUIDOnly, CurrentSpoofingID);
                     i = 0;
                 }
                 else
