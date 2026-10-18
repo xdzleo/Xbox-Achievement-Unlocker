@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using XboxAuthNet.XboxLive.Crypto;
 using XboxAuthNet.XboxLive.Responses;
 
@@ -25,7 +26,10 @@ public abstract class AbstractXboxSignedAuthRequest
     private HttpRequestMessage buildRequest(IXboxRequestSigner signer)
     {
         var body = BuildBody(signer.ProofKey);
-        var bodyStr = JsonSerializer.Serialize(body);
+        var bodyStr = JsonSerializer.Serialize(body, new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        });
 
         var req = new HttpRequestMessage
         {
