@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Security.Cryptography;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using XAU.ViewModels.Pages;
@@ -307,15 +308,18 @@ public class XboxRestAPI
 
         var body = await response.Content.ReadAsStringAsync();
         var fields = new List<string>();
+        var bodyMetadata = $"body_length={body.Length}; body_sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(body)))[..16]}";
         try
         {
             var json = JObject.Parse(body);
+            var keys = string.Join(",", json.Properties().Select(p => p.Name).OrderBy(name => name, StringComparer.Ordinal));
             foreach (var name in new[] { "XErr", "xerr", "error", "errorCode", "code", "message" })
             {
                 var value = json[name]?.ToString();
                 if (!string.IsNullOrWhiteSpace(value))
                     fields.Add($"{name}={value[..Math.Min(value.Length, 120)]}");
             }
+            bodyMetadata += $"; body_keys={keys}";
         }
         catch
         {
@@ -324,7 +328,7 @@ public class XboxRestAPI
             // Xbox returns a non-JSON error.
         }
 
-        return $"correlation={correlation}; {string.Join(",", fields)}";
+        return $"correlation={correlation}; {bodyMetadata}; {string.Join(",", fields)}";
     }
 
     public async Task StopHeartbeatAsync(string xuid)
