@@ -89,6 +89,11 @@ public class XboxRestAPI
     {
         if (!ulong.TryParse(titleId, out var numericTitleId))
             return false;
+        if (string.IsNullOrWhiteSpace(_xauth))
+        {
+            HomeViewModel.EventsLog("Presence skipped: no presence-capable XAUTH is available");
+            return false;
+        }
 
         try
         {
@@ -255,6 +260,11 @@ public class XboxRestAPI
         if (string.IsNullOrWhiteSpace(xuid) || string.IsNullOrWhiteSpace(spoofedTitleId))
         {
             // Don't send a request if we don't have the details
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_xauth))
+        {
+            HomeViewModel.EventsLog("Heartbeat skipped: no presence-capable XAUTH is available");
             return;
         }
 

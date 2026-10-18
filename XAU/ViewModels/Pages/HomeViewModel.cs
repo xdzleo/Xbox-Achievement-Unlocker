@@ -1050,8 +1050,7 @@ namespace XAU.ViewModels.Pages
                 var relyingParties = new[]
                 {
                     XboxAuthConstants.XboxUserPresenceRelyingParty,
-                    "https://userpresence.xboxlive.com",
-                    XboxAuthConstants.XboxLiveRelyingParty
+                    "https://userpresence.xboxlive.com"
                 };
 
                 foreach (var relyingParty in relyingParties)

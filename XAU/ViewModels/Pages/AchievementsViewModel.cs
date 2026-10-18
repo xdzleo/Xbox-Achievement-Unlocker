@@ -39,9 +39,7 @@ namespace XAU.ViewModels.Pages
         private Lazy<XboxRestAPI> _xboxRestAPI = new Lazy<XboxRestAPI>(() => new XboxRestAPI(HomeViewModel.XAUTH));
 
         private XboxRestAPI PresenceApi() => new XboxRestAPI(
-            string.IsNullOrWhiteSpace(HomeViewModel.PresenceXAUTH)
-                ? HomeViewModel.XAUTH
-                : HomeViewModel.PresenceXAUTH);
+            HomeViewModel.PresenceXAUTH);
 
         public static bool SpoofingUpdate = false;
         private bool IsFiltered = false;
