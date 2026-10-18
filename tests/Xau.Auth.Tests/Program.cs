@@ -68,7 +68,7 @@ internal static class Program
         Assert(props.GetProperty("TitleToken").GetString() == "title-token", "title token not forwarded");
         Assert(props.GetProperty("OptionalDisplayClaims")[1].GetString() == "xti", "display claims not forwarded");
         Assert(props.GetProperty("SandboxId").GetString() == "RETAIL", "sandbox contract changed");
-        Assert(props.GetProperty("ProofKey").GetProperty("key").GetString() == "synthetic-proof-key", "proof key not forwarded");
+        Assert(!props.TryGetProperty("ProofKey", out _), "proof key must stay out of the delegated XSTS property bag");
         Assert(handler.Request.Headers.TryGetValues("Signature", out var signatures) && signatures.Single() == "synthetic-signature", "signature header missing");
         Assert(handler.Request.Headers.GetValues("x-xbl-contract-version").Single() == "1", "signed contract version must be 1");
         Assert(handler.Request.Headers.GetValues("Accept").Single() == "application/json", "common headers missing");

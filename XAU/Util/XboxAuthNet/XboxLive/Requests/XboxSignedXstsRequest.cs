@@ -32,8 +32,7 @@ namespace XboxAuthNet.XboxLive.Requests
                     DeviceToken = DeviceToken,
                     TitleToken = TitleToken,
                     OptionalDisplayClaims = OptionalDisplayClaims,
-                    SandboxId = "RETAIL",
-                    ProofKey = proofKey
+                    SandboxId = "RETAIL"
                 }
             };
         }
