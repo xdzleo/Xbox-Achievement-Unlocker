@@ -972,7 +972,30 @@ namespace XAU.ViewModels.Pages
                 if (string.IsNullOrWhiteSpace(response.AccessToken))
                     throw new InvalidOperationException("OAuth response did not contain an access token");
 
-                var deviceTokenResult = await xboxSignedClient.RequestDeviceToken(XboxDeviceTypes.Win32, "0.0.0");
+                XboxAuthResponse deviceTokenResult;
+                if (ForceNativeDevice || Environment.GetEnvironmentVariable("XAU_NATIVE_DEVICE") == "1")
+                {
+                    var osVersion = NativeDeviceInfo.VersionString(Environment.OSVersion.Version);
+                    string seed;
+                    try
+                    {
+                        using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWAREMicrosoftCryptography");
+                        seed = key?.GetValue("MachineGuid") as string ?? Environment.MachineName;
+                    }
+                    catch { seed = Environment.MachineName; }
+                    EventsLog($"Device token profile=NativeWin32; version={osVersion}; serial=omitted; id=stable");
+                    deviceTokenResult = await xboxSignedClient.RequestDeviceToken(new XboxDeviceTokenRequest
+                    {
+                        NativeWin32Profile = true,
+                        DeviceType = XboxDeviceTypes.Win32,
+                        DeviceVersion = osVersion,
+                        Id = NativeDeviceInfo.StableDeviceId(seed)
+                    });
+                }
+                else
+                {
+                    deviceTokenResult = await xboxSignedClient.RequestDeviceToken(XboxDeviceTypes.Win32, "0.0.0");
+                }
                 var deviceToken = deviceTokenResult.Token;
                 if (string.IsNullOrWhiteSpace(deviceToken))
                     throw new InvalidOperationException("Device token response did not contain a token");
@@ -1065,6 +1088,9 @@ namespace XAU.ViewModels.Pages
         // does not depend on settings.json.
         public static HomeViewModel? Instance;
         public static bool CliMode;
+        // EXPERIMENT: device token with the native xgameruntime layout (see
+        // NativeDeviceInfo). Off by default; --native-device or XAU_NATIVE_DEVICE=1.
+        public static bool ForceNativeDevice;
         // Title id the title-bound SISU experiment asks for instead of the game's
         // (e.g. 704208617, the Xbox App's own title). Also read from XAU_SISU_TITLE.
         public static string? SisuTitleOverride;

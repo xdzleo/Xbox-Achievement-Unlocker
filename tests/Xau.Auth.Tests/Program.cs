@@ -43,6 +43,9 @@ internal static class Program
         await Run("state-only presence write is bound only to the token title", StateOnlyPresenceBindsToTokenTitle);
         await Run("presence readback confirms only the requested active title", PresenceReadbackConfirmsRequestedTitle);
         await Run("presence readback rejects malformed or foreign bodies", PresenceReadbackRejectsMalformed);
+        await Run("device token legacy body is unchanged", DeviceTokenLegacyBodyUnchanged);
+        await Run("device token native profile follows the xgameruntime layout", DeviceTokenNativeProfileLayout);
+        await Run("native device info: version string and stable id", NativeDeviceInfoValues);
         await Run("readback description names device, title id, name, placement and state", ReadbackDescriptionIdentifiesDeviceAndTitle);
         await Run("rate limit description keeps only limit fields and period parses", RateLimitDescription);
         await Run("presence probe plan is identical for every token and has exact wire bodies", PresenceProbePlanIsTokenIndependent);
@@ -117,6 +120,70 @@ internal static class Program
             Assert(!result.RequestedTitleActive, $"body {body ?? "null"} must not confirm presence");
         }
         Assert(!PresenceVerification.ParseReadback("{\"devices\":[]}", "0").Parsed, "invalid requested title is not parsed");
+        return Task.CompletedTask;
+    }
+
+    private static async Task DeviceTokenLegacyBodyUnchanged()
+    {
+        var handler = new CaptureHandler(Json("Token", "device-result"));
+        using var client = new HttpClient(handler);
+        var signer = new RecordingSigner(new { alg = "ES256", key = "synthetic-proof-key" });
+        await new XboxDeviceTokenRequest { DeviceType = "Win32", DeviceVersion = "0.0.0" }.Send(client, signer);
+        using var body = JsonDocument.Parse(handler.Body!);
+        var props = body.RootElement.GetProperty("Properties");
+        Assert(props.EnumerateObject().Select(p => p.Name).SequenceEqual(new[] { "AuthMethod", "Id", "DeviceType", "SerialNumber", "Version", "ProofKey" }),
+            "legacy device body order changed");
+        Assert(props.GetProperty("Version").GetString() == "0.0.0" && props.GetProperty("DeviceType").GetString() == "Win32", "legacy device values");
+        Assert(handler.Body == signer.Body, "device signature input must equal the wire body");
+    }
+
+    private static async Task DeviceTokenNativeProfileLayout()
+    {
+        var handler = new CaptureHandler(Json("Token", "device-result"));
+        using var client = new HttpClient(handler);
+        var signer = new RecordingSigner(new { alg = "ES256", key = "synthetic-proof-key" });
+        await new XboxDeviceTokenRequest
+        {
+            NativeWin32Profile = true, DeviceType = "Win32", DeviceVersion = "10.0.29683",
+            Id = "11111111-2222-3333-4444-555555555555"
+        }.Send(client, signer);
+        using var body = JsonDocument.Parse(handler.Body!);
+        Assert(body.RootElement.EnumerateObject().Select(p => p.Name).SequenceEqual(new[] { "Properties", "RelyingParty", "TokenType" }), "native device top-level order");
+        var props = body.RootElement.GetProperty("Properties");
+        Assert(props.EnumerateObject().Select(p => p.Name).SequenceEqual(new[] { "AuthMethod", "Id", "DeviceType", "Version", "ProofKey" }),
+            "native device body must omit SerialNumber and order Version before ProofKey");
+        Assert(props.GetProperty("Id").GetString() == "{11111111-2222-3333-4444-555555555555}", "native Id keeps braces");
+        Assert(props.GetProperty("Version").GetString() == "10.0.29683", "native Version is the OS version");
+        Assert(handler.Body == signer.Body, "native device signature input must equal the wire body");
+
+        // SerialNumber is written only when supplied, after Version.
+        var handler2 = new CaptureHandler(Json("Token", "device-result"));
+        using var client2 = new HttpClient(handler2);
+        await new XboxDeviceTokenRequest
+        {
+            NativeWin32Profile = true, DeviceType = "Win32", DeviceVersion = "10.0.1", Id = "id", SerialNumber = "sn"
+        }.Send(client2, new RecordingSigner(new { alg = "ES256" }));
+        using var body2 = JsonDocument.Parse(handler2.Body!);
+        Assert(body2.RootElement.GetProperty("Properties").EnumerateObject().Select(p => p.Name)
+            .SequenceEqual(new[] { "AuthMethod", "Id", "DeviceType", "Version", "SerialNumber", "ProofKey" }), "native order with serial");
+
+        var threw = false;
+        try { await new XboxDeviceTokenRequest { NativeWin32Profile = true, DeviceType = "Win32", DeviceVersion = "10.0.1" }.Send(new HttpClient(new CaptureHandler("{}")), new RecordingSigner(new { })); }
+        catch (InvalidOperationException) { threw = true; }
+        Assert(threw, "native profile requires a stable Id before sending");
+    }
+
+    private static Task NativeDeviceInfoValues()
+    {
+        Assert(NativeDeviceInfo.VersionString(new Version(10, 0, 29683, 1000)) == "10.0.29683", "major.minor.build");
+        Assert(NativeDeviceInfo.VersionString(new Version(6, 1)) == "6.1.0", "missing build is zero");
+        var a = NativeDeviceInfo.StableDeviceId("ABC-123");
+        Assert(a == NativeDeviceInfo.StableDeviceId(" abc-123 "), "stable id ignores case and spaces");
+        Assert(a != NativeDeviceInfo.StableDeviceId("abc-124"), "different seed gives another id");
+        Assert(Guid.TryParse(a, out _) && !a.Contains("abc", StringComparison.OrdinalIgnoreCase), "id is a GUID that does not echo the seed");
+        var threw = false;
+        try { NativeDeviceInfo.StableDeviceId(" "); } catch (ArgumentException) { threw = true; }
+        Assert(threw, "empty seed rejected");
         return Task.CompletedTask;
     }
 

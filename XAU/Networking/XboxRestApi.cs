@@ -165,6 +165,23 @@ public class XboxRestAPI
     // fresh client and the same explicit headers, so two runs with different
     // tokens differ only in Authorization/Signature. Logs status, error code,
     // body size and numeric title ids; never bodies, tokens or signatures.
+    // One-line description of the current presence (device/title/placement/state).
+    public async Task<string> ReadbackDescriptionAsync(string xuid)
+    {
+        try
+        {
+            SetPresenceHeaders();
+            using var response = await SendPresenceServiceAsync(HttpMethod.Get, string.Format(InterpolatedXboxAPIUrls.PresenceReadUrl, xuid), null);
+            if (!response.IsSuccessStatusCode)
+                return $"status={(int)response.StatusCode}";
+            return PresenceVerification.DescribeReadback(await response.Content.ReadAsStringAsync());
+        }
+        catch (HttpRequestException ex)
+        {
+            return $"transport failure {ex.GetType().Name}";
+        }
+    }
+
     // DELETE of the current-title presence. xgameruntime FUN_1802566f4 builds a
     // "DELETE" request through the same request-preparation function
     // (FUN_180256bd8) used for the write, so this mirrors the native cleanup.

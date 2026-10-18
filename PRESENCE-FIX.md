@@ -1,5 +1,38 @@
 # OAuth presence fix
 
+## Correction and native device token (v0.1.16)
+
+**Retracted inference.** The previous section attributed `Active Device: iOS`
+and title `328178078` (Xbox Console Companion) to the OAuth token. That was not
+established: the read-back already listed `328178078` *before* any write in the
+same run (17:26), so it can be another device of the account, for example a
+phone running the Xbox mobile app. A controlled run with the Xbox App closed and
+only an OAuth write showed the opposite: `{"state":"active"}` with the OAuth
+token appears about 10 s later as `Win32[704208617/Online/Full/Active]`, i.e. the
+**Win32** device and the Xbox App title. The Xbox App's own presence is
+`WindowsOneCore[704208617/Online/Background/Active]`. What remains true: with
+identical requests the legacy heartbeat returns 200 for the Xbox App token and
+403 for the OAuth token.
+
+**Native device token (xgameruntime FUN_1802b9210, FUN_1802a2c70, FUN_1802a04e8).**
+
+| Field | Native | XAU before |
+|---|---|---|
+| DeviceType | `Win32` (literal) | `Win32` |
+| Version | `RtlGetVersion` formatted `%lu.%lu.%lu` | `0.0.0` |
+| Id | written after AuthMethod; value kept with the persistent device key | new UUID every login |
+| SerialNumber | only when nonempty (default empty) | random UUID always |
+| order | AuthMethod, Id, DeviceType, Version, SerialNumber?, DeviceModel?, DeviceSku?, ProofKey | AuthMethod, Id, DeviceType, SerialNumber, Version, ProofKey |
+
+`NativeWin32Profile` reproduces this body (opt-in: `--native-device` or
+`XAU_NATIVE_DEVICE=1`; the OS version comes from `Environment.OSVersion`, the Id
+is a stable GUID derived from the machine). Whether the heartbeat service reacts
+to the device token is unproven.
+
+`--watch <seconds>` logs the presence read-back every 15 s (the read-back can
+lag the write by about 10 s).
+
+
 ## Observations from the live comparison (2026-10-18 17:22-17:26, v0.1.12)
 
 All values below are from `events_debug.log` of one machine/account.

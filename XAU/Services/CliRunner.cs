@@ -16,6 +16,8 @@ namespace XAU.Services;
 //   --probe <titleId>          run the presence probe matrix (forced on)
 //   --title-bound              force the title-bound SISU experiment first
 //   --sisu-title <id>          title id to ask SISU for (default: the probed game)
+//   --native-device            device token with the native xgameruntime layout
+//   --watch <seconds>          after the steps, log the presence read-back every 15 s
 //   --pace <ms>                delay between probe steps (default 1500)
 //   --stop                     DELETE presence and heartbeat when finished
 //   --exit                     close the app when finished
@@ -26,6 +28,9 @@ public static class CliRunner
 
     public static void Start(string[] args)
     {
+        // Set synchronously: the device token is built during login, which can start
+        // before the background task below runs.
+        HomeViewModel.ForceNativeDevice = Flag(args, "--native-device");
         _ = Task.Run(() => RunAsync(args));
     }
 
@@ -110,6 +115,16 @@ public static class CliRunner
                 else if (HomeViewModel.ForceTitleBoundSisu)
                     HomeViewModel.EventsLog("CLI: title-bound SISU needs an OAuth login; skipped");
                 await HomeViewModel.RunPresenceProbeAsync(probeTitle);
+            }
+
+            if (int.TryParse(Value(args, "--watch"), out var watchSeconds) && watchSeconds > 0)
+            {
+                var watchApi = new XboxRestAPI(HomeViewModel.XAUTH);
+                for (var waited = 0; waited < watchSeconds; waited += 15)
+                {
+                    await Task.Delay(15000);
+                    HomeViewModel.EventsLog($"CLI watch +{waited + 15}s: {await watchApi.ReadbackDescriptionAsync(HomeViewModel.XUIDOnly)}");
+                }
             }
 
             if (Flag(args, "--stop"))

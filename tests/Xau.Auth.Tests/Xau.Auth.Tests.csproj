@@ -13,6 +13,8 @@
     <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Requests/CommonRequestHeaders.cs" Link="Source/CommonRequestHeaders.cs" />
     <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Requests/XboxSignedXstsRequest.cs" Link="Source/XboxSignedXstsRequest.cs" />
     <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Requests/XboxSisuAuthRequest.cs" Link="Source/XboxSisuAuthRequest.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Requests/XboxDeviceTokenRequest.cs" Link="Source/XboxDeviceTokenRequest.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Requests/NativeDeviceInfo.cs" Link="Source/NativeDeviceInfo.cs" />
     <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Requests/XboxXstsRequest.cs" Link="Source/XboxXstsRequest.cs" />
     <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Crypto/IXboxRequestSigner.cs" Link="Source/IXboxRequestSigner.cs" />
     <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Crypto/IPopCryptoProvider.cs" Link="Source/IPopCryptoProvider.cs" />
