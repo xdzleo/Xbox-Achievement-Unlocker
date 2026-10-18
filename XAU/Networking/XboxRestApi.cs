@@ -87,7 +87,7 @@ public class XboxRestAPI
 
     private async Task<bool> SendPresenceAsync(string xuid, string titleId)
     {
-        if (!ulong.TryParse(titleId, out var numericTitleId))
+        if (!uint.TryParse(titleId, out var numericTitleId))
             return false;
         if (string.IsNullOrWhiteSpace(_xauth))
         {
@@ -102,7 +102,7 @@ public class XboxRestAPI
             var response = await _spooferClient.PostAsync(
                 string.Format(InterpolatedXboxAPIUrls.PresenceUrl, xuid),
                 new StringContent(JsonConvert.SerializeObject(body), Encoding.UTF8, HeaderValues.Accept));
-            HomeViewModel.EventsLog($"Presence POST => {(int)response.StatusCode} {response.StatusCode}");
+            HomeViewModel.EventsLog($"Presence POST => {(int)response.StatusCode} {response.StatusCode}; {await DescribeFailureAsync(response)}");
             return response.IsSuccessStatusCode;
         }
         catch (HttpRequestException ex)
@@ -288,7 +288,38 @@ public class XboxRestAPI
         var heartbeatResponse = await _spooferClient.PostAsync(
         string.Format(InterpolatedXboxAPIUrls.HeartbeatUrl, xuid),
         new StringContent(JsonConvert.SerializeObject(heartbeatRequest), Encoding.UTF8, HeaderValues.Accept));
-        HomeViewModel.EventsLog($"Heartbeat POST => {(int)heartbeatResponse.StatusCode} {heartbeatResponse.StatusCode}");
+        HomeViewModel.EventsLog($"Heartbeat POST => {(int)heartbeatResponse.StatusCode} {heartbeatResponse.StatusCode}; {await DescribeFailureAsync(heartbeatResponse)}");
+    }
+
+    private static async Task<string> DescribeFailureAsync(HttpResponseMessage response)
+    {
+        var correlation = response.Headers.TryGetValues("X-XblCorrelationId", out var values)
+            ? values.FirstOrDefault() ?? "none"
+            : "none";
+
+        if (response.IsSuccessStatusCode)
+            return $"correlation={correlation}";
+
+        var body = await response.Content.ReadAsStringAsync();
+        var fields = new List<string>();
+        try
+        {
+            var json = JObject.Parse(body);
+            foreach (var name in new[] { "XErr", "xerr", "error", "errorCode", "code", "message" })
+            {
+                var value = json[name]?.ToString();
+                if (!string.IsNullOrWhiteSpace(value))
+                    fields.Add($"{name}={value[..Math.Min(value.Length, 120)]}");
+            }
+        }
+        catch
+        {
+            // Do not write arbitrary response bodies: they may contain tokens
+            // or account data. Status and correlation ID are sufficient when
+            // Xbox returns a non-JSON error.
+        }
+
+        return $"correlation={correlation}; {string.Join(",", fields)}";
     }
 
     public async Task StopHeartbeatAsync(string xuid)

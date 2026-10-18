@@ -50,7 +50,7 @@ public class TitleRequest
 
 public class PresenceTitleRequest
 {
-    public ulong id { get; set; }
+    public uint id { get; set; }
     public string state { get; set; } = "active";
     public string placement { get; set; } = "full";
 }

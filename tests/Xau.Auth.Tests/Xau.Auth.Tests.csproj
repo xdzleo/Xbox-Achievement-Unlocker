@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/XboxAuthConstants.cs" Link="Source/XboxAuthConstants.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Requests/AbstractXboxAuthRequest.cs" Link="Source/AbstractXboxAuthRequest.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Requests/AbstractXboxSignedAuthRequest.cs" Link="Source/AbstractXboxSignedAuthRequest.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Requests/CommonRequestHeaders.cs" Link="Source/CommonRequestHeaders.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Requests/XboxSignedXstsRequest.cs" Link="Source/XboxSignedXstsRequest.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Requests/XboxXstsRequest.cs" Link="Source/XboxXstsRequest.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Crypto/IXboxRequestSigner.cs" Link="Source/IXboxRequestSigner.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Responses/XboxAuthResponse.cs" Link="Source/XboxAuthResponse.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Responses/XboxAuthResponseHandler.cs" Link="Source/XboxAuthResponseHandler.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Responses/XboxAuthXuiClaims.cs" Link="Source/XboxAuthXuiClaims.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Responses/XboxAuthXuiClaimsJsonConverter.cs" Link="Source/XboxAuthXuiClaimsJsonConverter.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Responses/XboxErrorResponse.cs" Link="Source/XboxErrorResponse.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/Responses/XErrJsonConverter.cs" Link="Source/XErrJsonConverter.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/XboxAuthXuiClaimNames.cs" Link="Source/XboxAuthXuiClaimNames.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/XboxAuthException.cs" Link="Source/XboxAuthException.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/ErrorHelper.cs" Link="Source/ErrorHelper.cs" />
+  </ItemGroup>
+</Project>

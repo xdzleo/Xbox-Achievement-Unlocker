@@ -24,6 +24,9 @@ jobs:
       - name: Restore
         run: dotnet restore /p:EnableWindowsTargeting=true
 
+      - name: Run offline XboxAuthNet contract tests
+        run: dotnet run --project tests/Xau.Auth.Tests/Xau.Auth.Tests.csproj -c Release
+
       - name: Publish test build
         run: dotnet publish XAU.sln -c Release -r win-x64 --self-contained false /p:PublishSingleFile=true /p:PublishReadyToRun=false /p:IncludeAllContentForSelfExtract=true /p:EnableWindowsTargeting=true -o ./presence-test-publish
 

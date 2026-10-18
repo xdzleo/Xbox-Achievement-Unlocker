@@ -36,6 +36,10 @@ public abstract class AbstractXboxSignedAuthRequest
 
         var signature = signer.SignRequest(RequestUrl, Token, bodyStr);
         req.Headers.Add("Signature", signature);
+        // Xbox authentication endpoints reject signed requests without the
+        // protocol contract header. The unsigned base request already adds
+        // this header; signed requests must carry the same version explicitly.
+        req.Headers.Add("x-xbl-contract-version", "1");
         CommonRequestHeaders.AddDefaultHeaders(req);
         return req;
     }

@@ -97,9 +97,9 @@ namespace XAU.ViewModels.Pages
         bool eventsTokenFound = false;
         public static bool XAUTHTested = false;
         public static string XAUTH = "";
-        // Presence uses a separate XSTS relying party. Keep it separate from the
-        // normal profile/achievement XAUTH because the latter can be rejected by
-        // userpresence.xboxlive.com even when reads succeed.
+        // Keep the presence candidate separate from the normal profile/achievement
+        // XAUTH. The candidate is accepted only after the presence endpoint returns
+        // success; token headers alone cannot reveal the encrypted RP/claims.
         public static string PresenceXAUTH = "";
         public static string XUIDOnly;
         public static bool InitComplete = false;
@@ -955,8 +955,8 @@ namespace XAU.ViewModels.Pages
 
                 // SISU returns a normal AuthorizationToken plus optional
                 // UserToken/TitleToken/DeviceToken inputs. Keep the normal
-                // token for profile/achievement reads; presence requires a
-                // second XSTS request scoped to userpresence.xboxlive.com.
+                // token for profile/achievement reads; presence gets a separate
+                // title-aware XSTS candidate and is validated by the API response.
                 var userToken = sisuResult.UserToken?.Token;
                 var titleToken = sisuResult.TitleToken?.Token;
                 var returnedDeviceToken = sisuResult.DeviceToken;
@@ -1049,8 +1049,7 @@ namespace XAU.ViewModels.Pages
 
                 var relyingParties = new[]
                 {
-                    XboxAuthConstants.XboxUserPresenceRelyingParty,
-                    "https://userpresence.xboxlive.com"
+                    XboxAuthConstants.XboxLiveRelyingParty
                 };
 
                 foreach (var relyingParty in relyingParties)
@@ -1062,7 +1061,8 @@ namespace XAU.ViewModels.Pages
                             UserToken = userToken,
                             DeviceToken = returnedDeviceToken,
                             TitleToken = titleToken,
-                            RelyingParty = relyingParty
+                            RelyingParty = relyingParty,
+                            OptionalDisplayClaims = new[] { "xui", "xti" }
                         });
 
                         if (!string.IsNullOrWhiteSpace(signedXsts.Token)
@@ -1085,7 +1085,8 @@ namespace XAU.ViewModels.Pages
                             UserToken = userToken,
                             DeviceToken = returnedDeviceToken,
                             TitleToken = titleToken,
-                            RelyingParty = relyingParty
+                            RelyingParty = relyingParty,
+                            OptionalDisplayClaims = new[] { "xui", "xti" }
                         });
 
                         if (!string.IsNullOrWhiteSpace(unsignedXsts.Token)

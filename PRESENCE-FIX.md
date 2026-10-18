@@ -10,8 +10,9 @@ the final XSTS token.
 
 1. requires SISU `UserToken`, `TitleToken`, and `DeviceToken`;
 2. calls `xsts/authorize` through `XboxSignedXstsRequest` with all three
-   tokens, the ProofKey, `RelyingParty=http://xboxlive.com`, and optional
-   `xui`/`xti` display claims;
+   tokens, the ProofKey, the standard `RelyingParty=http://xboxlive.com`, and
+   optional `xui`/`xti` display claims. A custom `userpresence` relying party
+   is not assumed because no public Xbox service mapping proves it;
 3. uses that final XSTS token to construct `XBL3.0` and the XUID shown by the
    application.
 
