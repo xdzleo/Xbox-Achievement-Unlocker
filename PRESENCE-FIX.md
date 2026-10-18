@@ -1,5 +1,49 @@
 # OAuth presence fix
 
+## Observations from the live comparison (2026-10-18 17:22-17:26, v0.1.12)
+
+All values below are from `events_debug.log` of one machine/account.
+
+| | Xbox App token (memory) | OAuth login |
+|---|---|---|
+| Home "Active Device" | `Win32` | `iOS` (user screenshot) |
+| presence read-back title ids | `704208617` | `328178078` |
+| legacy heartbeat (string or numeric id) | 200 | 403 `Forbidden`, signed or not |
+| current-title `{"state":"active"}` | 200 | 200 |
+| current-title `{id,state,placement}` | 400 `ArgumentError` | 400 `ArgumentError` |
+| game visible to the user | yes (user report) | no |
+
+With identical requests the two tokens behave differently only at the legacy
+heartbeat (authorization) and in which device/title the service attributes
+the write to. That attributes the difference to the token's identity
+(device type and title), not to the request shape. **The read-back reported
+`requested_active=False` for the Xbox App token although the user saw the
+game, so the read-back is not a reliable success signal**; it is kept only as
+a diagnostic that now prints device type, title id, name, placement and state
+(`DescribeReadback`) so `iOS`/`328178078` can be identified.
+
+The first probe also hit HTTP 429 (per-user rate limit, ~20 requests in four
+seconds), which invalidated the second token's rows. The probe now paces its
+steps (default 1500 ms), waits between tokens and stops a token's run on 429,
+logging `limitType/currentRequests/maxRequests/periodInSeconds`.
+
+Bug fixed: `LoadSettings` did not copy `TitleBoundSisuExperiment` or
+`PresenceProbe`, so those flags never took effect from `settings.json`
+(`title_bound_experiment=False` in the log). Only the environment variables
+worked.
+
+## Headless test mode (v0.1.13)
+
+`XAU.exe --cli [--info <ids>] [--probe <titleId>] [--title-bound] [--pace <ms>]
+[--stop] [--exit]` drives the app's own login (Xbox App token, or the saved
+OAuth session when `OAuthLogin` is on) and logs `CLI ...` and `Probe ...`
+lines, ending with `CLI done`. `tools/xau-cli-test.ps1` wraps it. The runner
+never reads, prints or accepts tokens and never enters credentials; with no
+usable saved session it stops (`CLI error: not logged in`). `--info` looks up
+names/devices of title ids; `--stop` sends the native-style DELETE of the
+current-title presence plus the heartbeat DELETE.
+
+
 ## Controlled comparison probe (v0.1.12, opt-in diagnostic, OFF by default)
 
 Three statements earlier in this document are **hypotheses, not findings**:

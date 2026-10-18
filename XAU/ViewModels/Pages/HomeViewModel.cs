@@ -71,6 +71,7 @@ namespace XAU.ViewModels.Pages
         //SnackBar
         public HomeViewModel(ISnackbarService snackbarService, IContentDialogService contentDialogService)
         {
+            Instance = this;
             _snackbarService = snackbarService;
             _contentDialogService = contentDialogService;
 
@@ -1050,8 +1051,21 @@ namespace XAU.ViewModels.Pages
                 EventsTokenWorker.RunWorkerAsync();
         }
 
+        // Set by the command-line runner (XAU.exe --cli ...) so a headless run
+        // does not depend on settings.json.
+        public static HomeViewModel? Instance;
+        public static bool ForcePresenceProbe;
+        public static bool ForceTitleBoundSisu;
+        public static int ProbePaceMs = 1500;
+
+        // Starts the same OAuth login as the Login button (saved session first).
+        // Never fills credentials: if the session is gone it stops at the
+        // interactive window.
+        public void CliOAuthLogin() => OAuthLogin();
+
         private static bool PresenceProbeEnabled() =>
-            Settings.PresenceProbe
+            ForcePresenceProbe
+            || Settings.PresenceProbe
             || Environment.GetEnvironmentVariable("XAU_PRESENCE_PROBE") == "1";
 
         // DIAGNOSTIC (opt-in, off by default). Sends the identical PresenceProbePlan
@@ -1086,13 +1100,17 @@ namespace XAU.ViewModels.Pages
             {
                 EventsLog($"Probe token[{candidate.Label}]: {DescribeXauthMetadata(candidate.Token)}; signer={(candidate.Signer != null)}; title_claim={(string.IsNullOrWhiteSpace(candidate.TitleClaim) ? "none" : candidate.TitleClaim)}");
                 await new XboxRestAPI(candidate.Token, presenceTokenTitleId: candidate.TitleClaim, presenceSigner: candidate.Signer)
-                    .ProbePresenceAsync(XUIDOnly, canonicalTitle, candidate.Label);
+                    .ProbePresenceAsync(XUIDOnly, canonicalTitle, candidate.Label, ProbePaceMs);
+                // Let the per-user rate-limit window recover before the next token.
+                if (candidate != candidates[candidates.Count - 1])
+                    await Task.Delay(Math.Max(ProbePaceMs * 4, 5000));
             }
             EventsLog("Probe finished");
         }
 
         private static bool TitleBoundSisuEnabled() =>
-            Settings.TitleBoundSisuExperiment
+            ForceTitleBoundSisu
+            || Settings.TitleBoundSisuExperiment
             || Environment.GetEnvironmentVariable("XAU_TITLE_BOUND_SISU") == "1";
 
         // EXPERIMENT. Native XAL init (xgameruntime FUN_1802078c8) requires a
@@ -1555,6 +1573,10 @@ namespace XAU.ViewModels.Pages
             Settings.PrivacyMode = settings.PrivacyMode;
             Settings.OAuthLogin = settings.OAuthLogin;
             Settings.AutoGrabEventsToken = settings.AutoGrabEventsToken;
+            // These two were missing before v0.1.13, so the settings.json flags
+            // never took effect (only the environment variables did).
+            Settings.TitleBoundSisuExperiment = settings.TitleBoundSisuExperiment;
+            Settings.PresenceProbe = settings.PresenceProbe;
             Settings.CachedEventsToken = settings.CachedEventsToken;
             Settings.EventsTokenObtainedAt = settings.EventsTokenObtainedAt;
             Settings.EventsUserHash = settings.EventsUserHash;

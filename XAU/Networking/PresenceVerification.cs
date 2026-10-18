@@ -98,6 +98,104 @@ public static class PresenceVerification
         }
     }
 
+    // One-line, log-safe description of a presence read-back: device type and
+    // each title's id, name, placement and state. These are public catalogue
+    // values, not credentials; control characters are removed and lengths
+    // are capped. Used to identify which title/device a write landed on.
+    public static string DescribeReadback(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return "empty";
+        JsonDocument document;
+        try { document = JsonDocument.Parse(json); }
+        catch (JsonException) { return "not-json"; }
+
+        using (document)
+        {
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return "not-object";
+            var parts = new List<string>();
+            if (TryGetPropertyIgnoreCase(root, "state", out var userState) && userState.ValueKind == JsonValueKind.String)
+                parts.Add($"user_state={Clean(userState.GetString(), 20)}");
+            if (TryGetPropertyIgnoreCase(root, "devices", out var devices) && devices.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var device in devices.EnumerateArray())
+                {
+                    if (device.ValueKind != JsonValueKind.Object)
+                        continue;
+                    var type = TryGetPropertyIgnoreCase(device, "type", out var t) && t.ValueKind == JsonValueKind.String ? Clean(t.GetString(), 24) : "?";
+                    var titleParts = new List<string>();
+                    if (TryGetPropertyIgnoreCase(device, "titles", out var titles) && titles.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var title in titles.EnumerateArray())
+                        {
+                            if (title.ValueKind != JsonValueKind.Object)
+                                continue;
+                            titleParts.Add(string.Join("/", new[] { "id", "name", "placement", "state" }
+                                .Select(key => TryGetPropertyIgnoreCase(title, key, out var v)
+                                    ? Clean(v.ValueKind == JsonValueKind.String ? v.GetString() : v.GetRawText(), 30)
+                                    : "-")));
+                        }
+                    }
+                    parts.Add($"device={type}[{(titleParts.Count == 0 ? "no-titles" : string.Join(";", titleParts))}]");
+                }
+            }
+            return parts.Count == 0 ? "no-devices" : string.Join(" ", parts);
+        }
+    }
+
+    // Numeric/enum fields of a 429 body (currentRequests, limitType,
+    // maxRequests, periodInSeconds, version).
+    public static string DescribeRateLimit(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return "rate_limit=unknown";
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                return "rate_limit=unknown";
+            var fields = new List<string>();
+            foreach (var key in new[] { "limitType", "currentRequests", "maxRequests", "periodInSeconds" })
+            {
+                if (TryGetPropertyIgnoreCase(document.RootElement, key, out var value)
+                    && (value.ValueKind == JsonValueKind.Number || value.ValueKind == JsonValueKind.String))
+                    fields.Add($"{key}={Clean(value.ValueKind == JsonValueKind.String ? value.GetString() : value.GetRawText(), 24)}");
+            }
+            return fields.Count == 0 ? "rate_limit=unknown" : string.Join(",", fields);
+        }
+        catch (JsonException)
+        {
+            return "rate_limit=unknown";
+        }
+    }
+
+    // periodInSeconds of a 429 body, or null when absent/invalid.
+    public static int? RateLimitPeriodSeconds(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && TryGetPropertyIgnoreCase(document.RootElement, "periodInSeconds", out var value)
+                && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var seconds) && seconds > 0)
+                return seconds;
+        }
+        catch (JsonException) { }
+        return null;
+    }
+
+    private static string Clean(string? value, int max)
+    {
+        if (string.IsNullOrEmpty(value))
+            return "-";
+        var chars = value.Where(c => !char.IsControl(c) && c != ';' && c != '/' && c != '[' && c != ']').Take(max).ToArray();
+        return chars.Length == 0 ? "-" : new string(chars);
+    }
+
     public static bool TryCanonicalTitleId(string? value, out ulong titleId)
     {
         titleId = 0;

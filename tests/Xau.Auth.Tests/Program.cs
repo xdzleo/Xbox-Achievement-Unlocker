@@ -43,6 +43,8 @@ internal static class Program
         await Run("state-only presence write is bound only to the token title", StateOnlyPresenceBindsToTokenTitle);
         await Run("presence readback confirms only the requested active title", PresenceReadbackConfirmsRequestedTitle);
         await Run("presence readback rejects malformed or foreign bodies", PresenceReadbackRejectsMalformed);
+        await Run("readback description names device, title id, name, placement and state", ReadbackDescriptionIdentifiesDeviceAndTitle);
+        await Run("rate limit description keeps only limit fields and period parses", RateLimitDescription);
         await Run("presence probe plan is identical for every token and has exact wire bodies", PresenceProbePlanIsTokenIndependent);
         await Run("presence probe plan adds signed steps only with a signer and rejects bad input", PresenceProbePlanSignedAndInvalid);
         await Run("title-bound SISU experiment request: contract 2, TitleId, no UCS/session context", TitleBoundSisuExperimentRequest);
@@ -115,6 +117,42 @@ internal static class Program
             Assert(!result.RequestedTitleActive, $"body {body ?? "null"} must not confirm presence");
         }
         Assert(!PresenceVerification.ParseReadback("{\"devices\":[]}", "0").Parsed, "invalid requested title is not parsed");
+        return Task.CompletedTask;
+    }
+
+    private static Task ReadbackDescriptionIdentifiesDeviceAndTitle()
+    {
+        const string body = """
+            {"xuid":"1","state":"Online","devices":[
+              {"type":"iOS","titles":[{"id":"328178078","name":"Xbox","placement":"Full","state":"Active","lastModified":"2026-10-18T20:00:00Z"}]},
+              {"type":"WindowsOneCore","titles":[{"id":704208617,"name":"Xbox App","placement":"Background","state":"Active"}]},
+              {"type":"Win32"}]}
+            """;
+        var text = PresenceVerification.DescribeReadback(body);
+        Assert(text == "user_state=Online device=iOS[328178078/Xbox/Full/Active] device=WindowsOneCore[704208617/Xbox App/Background/Active] device=Win32[no-titles]",
+            "readback description changed: " + text);
+        Assert(PresenceVerification.DescribeReadback(null) == "empty", "null body");
+        Assert(PresenceVerification.DescribeReadback("not json") == "not-json", "bad json");
+        Assert(PresenceVerification.DescribeReadback("[]") == "not-object", "array body");
+        Assert(PresenceVerification.DescribeReadback("{}") == "no-devices", "empty object");
+        var hostile = PresenceVerification.DescribeReadback("{\"devices\":[{\"type\":\"a;b\\n]\",\"titles\":[{\"id\":\"1\",\"name\":\"x/y;[z]\\u0007\"}]}]}");
+        Assert(!hostile.Contains('\n') && !hostile.Contains('\a') && hostile.Count(c => c == '[') == 1 && hostile.Count(c => c == ']') == 1,
+            "separators and control characters must be stripped: " + hostile);
+        Assert(PresenceVerification.DescribeReadback("{\"devices\":[{\"type\":\"" + new string('x', 200) + "\"}]}").Length < 80, "type length must be capped");
+        return Task.CompletedTask;
+    }
+
+    private static Task RateLimitDescription()
+    {
+        const string body = "{\"currentRequests\":31,\"limitType\":\"Rate\",\"maxRequests\":30,\"periodInSeconds\":15,\"version\":1,\"token\":\"secret\"}";
+        var text = PresenceVerification.DescribeRateLimit(body);
+        Assert(text == "limitType=Rate,currentRequests=31,maxRequests=30,periodInSeconds=15", "rate limit description: " + text);
+        Assert(!text.Contains("secret"), "unknown fields must not be copied");
+        Assert(PresenceVerification.RateLimitPeriodSeconds(body) == 15, "period parse");
+        Assert(PresenceVerification.RateLimitPeriodSeconds("{\"periodInSeconds\":0}") == null, "zero period is invalid");
+        Assert(PresenceVerification.RateLimitPeriodSeconds("{\"periodInSeconds\":\"15\"}") == null, "string period is not trusted");
+        Assert(PresenceVerification.RateLimitPeriodSeconds(null) == null && PresenceVerification.RateLimitPeriodSeconds("x") == null, "invalid input");
+        Assert(PresenceVerification.DescribeRateLimit("{}") == "rate_limit=unknown" && PresenceVerification.DescribeRateLimit(null) == "rate_limit=unknown", "unknown cases");
         return Task.CompletedTask;
     }
 

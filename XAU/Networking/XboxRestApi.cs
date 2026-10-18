@@ -165,7 +165,30 @@ public class XboxRestAPI
     // fresh client and the same explicit headers, so two runs with different
     // tokens differ only in Authorization/Signature. Logs status, error code,
     // body size and numeric title ids; never bodies, tokens or signatures.
-    public async Task ProbePresenceAsync(string xuid, string titleId, string label)
+    // DELETE of the current-title presence. xgameruntime FUN_1802566f4 builds a
+    // "DELETE" request through the same request-preparation function
+    // (FUN_180256bd8) used for the write, so this mirrors the native cleanup.
+    public async Task DeletePresenceAsync(string xuid)
+    {
+        if (string.IsNullOrWhiteSpace(xuid) || string.IsNullOrWhiteSpace(_xauth))
+            return;
+        try
+        {
+            SetPresenceHeaders();
+            using var response = await SendPresenceServiceAsync(HttpMethod.Delete,
+                string.Format(InterpolatedXboxAPIUrls.PresenceUrl, xuid), null);
+            HomeViewModel.EventsLog($"Presence DELETE => {(int)response.StatusCode} {response.StatusCode}; {SignedLabel}");
+        }
+        catch (HttpRequestException ex)
+        {
+            HomeViewModel.EventsLog($"Presence DELETE transport failure: {ex.GetType().Name}");
+        }
+    }
+
+    // paceMs spaces the steps: the first full-speed run hit HTTP 429 (a per-user
+    // rate limit) after about twenty requests in four seconds, which made the
+    // second token's results meaningless. A 429 stops this token's probe.
+    public async Task ProbePresenceAsync(string xuid, string titleId, string label, int paceMs = 1500)
     {
         var plan = PresenceProbePlan.Build(xuid, titleId, _presenceSigner != null);
         if (plan.Count == 0)
@@ -178,8 +201,13 @@ public class XboxRestAPI
         {
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
         });
+        var firstStep = true;
+        string? lastDescription = null;
         foreach (var step in plan)
         {
+            if (!firstStep && paceMs > 0)
+                await Task.Delay(paceMs);
+            firstStep = false;
             using var request = new HttpRequestMessage(new HttpMethod(step.Method), step.Url);
             request.Headers.TryAddWithoutValidation(HeaderNames.Authorization, _xauth);
             request.Headers.TryAddWithoutValidation(HeaderNames.ContractVersion, HeaderValues.ContractVersion3);
@@ -194,12 +222,22 @@ public class XboxRestAPI
             try
             {
                 using var response = await client.SendAsync(request);
+                if ((int)response.StatusCode == 429)
+                {
+                    var limitBody = await response.Content.ReadAsStringAsync();
+                    HomeViewModel.EventsLog($"Probe[{label}] {step.Name} => 429 TooManyRequests; {PresenceVerification.DescribeRateLimit(limitBody)}; stopping this token's probe");
+                    return;
+                }
                 var summary = await DescribeFailureAsync(response);
                 if (step.IsReadback && response.IsSuccessStatusCode)
                 {
-                    var result = PresenceVerification.ParseReadback(await response.Content.ReadAsStringAsync(), titleId);
+                    var readBody = await response.Content.ReadAsStringAsync();
+                    var result = PresenceVerification.ParseReadback(readBody, titleId);
                     var active = result.ActiveTitleIds.Count == 0 ? "none" : string.Join(",", result.ActiveTitleIds);
-                    HomeViewModel.EventsLog($"Probe[{label}] {step.Name} => {(int)response.StatusCode}; parsed={result.Parsed}; requested_active={result.RequestedTitleActive}; titles={result.TitleCount}; active_ids={active}");
+                    var description = PresenceVerification.DescribeReadback(readBody);
+                    var changed = description != lastDescription;
+                    lastDescription = description;
+                    HomeViewModel.EventsLog($"Probe[{label}] {step.Name} => {(int)response.StatusCode}; parsed={result.Parsed}; requested_active={result.RequestedTitleActive}; titles={result.TitleCount}; active_ids={active}{(changed ? "; " + description : "")}");
                 }
                 else
                 {

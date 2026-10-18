@@ -52,6 +52,8 @@ public partial class App
     {
         Host.Start();
         SetupExceptionHandling();
+        if (XAU.Services.CliRunner.Requested(e.Args))
+            XAU.Services.CliRunner.Start(e.Args);
     }
 
     private async void OnExit(object sender, ExitEventArgs e)
