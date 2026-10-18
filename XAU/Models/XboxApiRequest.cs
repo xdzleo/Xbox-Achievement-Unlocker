@@ -50,7 +50,10 @@ public class TitleRequest
 
 public class PresenceTitleRequest
 {
-    public uint id { get; set; }
+    // The userpresence TitleRequest contract declares id as a string. Keep
+    // the original decimal representation so callers do not lose leading
+    // zeroes or overflow a UInt32 while serializing the JSON body.
+    public string? id { get; set; }
     public string state { get; set; } = "active";
     public string placement { get; set; } = "full";
 }

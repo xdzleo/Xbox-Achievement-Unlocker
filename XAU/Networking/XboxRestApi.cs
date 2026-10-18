@@ -87,7 +87,12 @@ public class XboxRestAPI
 
     private async Task<bool> SendPresenceAsync(string xuid, string titleId)
     {
-        if (!uint.TryParse(titleId, out var numericTitleId))
+        // Microsoft models TitleRequest.id as a JSON string. Validate that the
+        // value is a decimal title id, but preserve its exact wire spelling.
+        // Converting to UInt32 changed the body from id:"0123" to id:123;
+        // the observed service response was ArgumentError, so preserve the
+        // documented string representation for the next controlled probe.
+        if (string.IsNullOrWhiteSpace(titleId) || titleId.Any(c => c < '0' || c > '9'))
             return false;
         if (string.IsNullOrWhiteSpace(_xauth))
         {
@@ -98,7 +103,7 @@ public class XboxRestAPI
         try
         {
             SetPresenceHeaders();
-            var body = new PresenceTitleRequest { id = numericTitleId };
+            var body = new PresenceTitleRequest { id = titleId };
             var response = await _spooferClient.PostAsync(
                 string.Format(InterpolatedXboxAPIUrls.PresenceUrl, xuid),
                 new StringContent(JsonConvert.SerializeObject(body), Encoding.UTF8, HeaderValues.Accept));

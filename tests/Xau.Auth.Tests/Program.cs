@@ -18,7 +18,7 @@ internal static class Program
         await Run("unsigned XSTS defaults to xboxlive RP and contract 1", UnsignedXstsDefaultsToXboxLiveRp);
         await Run("Xbox App presence RP keeps HTTPS candidate separate", XboxAppPresenceRpIsExplicit);
         await Run("unsigned XSTS carries device and title tokens", UnsignedXstsCarriesAllTokenInputs);
-        await Run("presence title request uses numeric title ID and fields", PresenceTitleRequestUsesWireShape);
+        await Run("presence title request uses string title ID and fields", PresenceTitleRequestUsesWireShape);
         await Run("numeric XErr is preserved as hexadecimal", NumericXErrIsHexadecimal);
         await Run("header X-Err is converted to hexadecimal", HeaderXErrIsHexadecimal);
         Console.WriteLine($"PASS: {_passed} offline XboxAuthNet contract tests");
@@ -117,11 +117,11 @@ internal static class Program
 
     private static Task PresenceTitleRequestUsesWireShape()
     {
-        var json = JsonSerializer.Serialize(new PresenceTitleRequest { id = 12345678 });
+        var json = JsonSerializer.Serialize(new PresenceTitleRequest { id = "0012345678" });
         using var body = JsonDocument.Parse(json);
         var root = body.RootElement;
-        Assert(root.GetProperty("id").ValueKind == JsonValueKind.Number, "presence title id must be a JSON number");
-        Assert(root.GetProperty("id").GetUInt32() == 12345678, "presence title id changed");
+        Assert(root.GetProperty("id").ValueKind == JsonValueKind.String, "presence title id must be a JSON string");
+        Assert(root.GetProperty("id").GetString() == "0012345678", "presence title id spelling changed");
         Assert(root.GetProperty("state").GetString() == "active", "presence state changed");
         Assert(root.GetProperty("placement").GetString() == "full", "presence placement changed");
         return Task.CompletedTask;
