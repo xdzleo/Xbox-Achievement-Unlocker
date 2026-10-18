@@ -50,10 +50,7 @@ public class TitleRequest
 
 public class PresenceTitleRequest
 {
-    // The documented presence wire contract serializes title IDs as strings
-    // (for example id:"12341234"). Keep this as text so the JSON shape does
-    // not change when a caller supplies a leading zero or a larger title ID.
-    public string? id { get; set; }
+    public uint id { get; set; }
     public string state { get; set; } = "active";
     public string placement { get; set; } = "full";
 }
