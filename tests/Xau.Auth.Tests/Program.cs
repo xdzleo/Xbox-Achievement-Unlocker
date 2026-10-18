@@ -174,6 +174,10 @@ internal static class Program
         Assert(root.GetProperty("UcsWebToken").GetString() == "web", "SISU UCS web token missing");
         Assert(root.GetProperty("Flow").GetString() == "consent", "SISU Flow=consent missing");
         Assert(!root.TryGetProperty("consent", out _), "consent is a value, not the native JSON key");
+        var expectedOrder = new[] { "AccessToken", "AppId", "TitleId", "DeviceToken", "Sandbox",
+            "UseModernGamertag", "SiteName", "RelyingParty", "SessionId", "UcsCheckinToken",
+            "UcsWebToken", "UserPrompts", "Flow", "ProofKey" };
+        Assert(root.EnumerateObject().Select(p => p.Name).SequenceEqual(expectedOrder), "native SISU field order changed");
     }
 
     private static HttpResponseMessage SisuResponse(HttpStatusCode status, string body,

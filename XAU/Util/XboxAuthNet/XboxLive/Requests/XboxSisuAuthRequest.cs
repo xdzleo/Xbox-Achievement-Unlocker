@@ -66,17 +66,16 @@ namespace XboxAuthNet.XboxLive.Requests
             {
                 ["AccessToken"] = TokenPrefix + AccessToken,
                 ["AppId"] = ClientId,
+                ["TitleId"] = TitleId,
                 ["DeviceToken"] = DeviceToken,
                 ["Sandbox"] = Sandbox,
                 ["UseModernGamertag"] = true,
                 ["SiteName"] = "user.auth.xboxlive.com",
-                ["RelyingParty"] = RelyingParty,
-                ["ProofKey"] = proofKey
+                ["RelyingParty"] = RelyingParty
             };
             // Dictionary null entries are not removed by WhenWritingNull.
-            foreach (var key in new[] { "AppId", "DeviceToken", "Sandbox" })
+            foreach (var key in new[] { "AppId", "TitleId", "DeviceToken", "Sandbox" })
                 if (body[key] == null) body.Remove(key);
-            if (TitleId != null) body["TitleId"] = TitleId;
             if (!string.IsNullOrEmpty(SessionId)) body["SessionId"] = SessionId;
             // FUN_1802a5960 gates the whole UCS group on both nonempty tokens.
             if (!string.IsNullOrEmpty(UcsCheckinToken) && !string.IsNullOrEmpty(UcsWebToken))
@@ -86,6 +85,7 @@ namespace XboxAuthNet.XboxLive.Requests
                 body["UserPrompts"] = UserPrompts ?? Array.Empty<string>();
                 if (RequestConsent) body["Flow"] = "consent";
             }
+            body["ProofKey"] = proofKey;
             return body;
         }
 
