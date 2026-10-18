@@ -15,6 +15,7 @@ namespace XAU.Services;
 //   --info <id[,id...]>        look up title names/devices (titlehub)
 //   --probe <titleId>          run the presence probe matrix (forced on)
 //   --title-bound              force the title-bound SISU experiment first
+//   --sisu-title <id>          title id to ask SISU for (default: the probed game)
 //   --pace <ms>                delay between probe steps (default 1500)
 //   --stop                     DELETE presence and heartbeat when finished
 //   --exit                     close the app when finished
@@ -48,6 +49,9 @@ public static class CliRunner
             if (int.TryParse(Value(args, "--pace"), out var pace) && pace >= 0)
                 HomeViewModel.ProbePaceMs = pace;
             HomeViewModel.ForceTitleBoundSisu = Flag(args, "--title-bound");
+            var sisuTitle = Value(args, "--sisu-title");
+            if (!string.IsNullOrWhiteSpace(sisuTitle))
+                HomeViewModel.SisuTitleOverride = sisuTitle;
             var probeTitle = Value(args, "--probe");
             HomeViewModel.ForcePresenceProbe = !string.IsNullOrEmpty(probeTitle);
 

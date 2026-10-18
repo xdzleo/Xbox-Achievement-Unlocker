@@ -1065,6 +1065,9 @@ namespace XAU.ViewModels.Pages
         // does not depend on settings.json.
         public static HomeViewModel? Instance;
         public static bool CliMode;
+        // Title id the title-bound SISU experiment asks for instead of the game's
+        // (e.g. 704208617, the Xbox App's own title). Also read from XAU_SISU_TITLE.
+        public static string? SisuTitleOverride;
         public static bool ForcePresenceProbe;
         public static bool ForceTitleBoundSisu;
         public static int ProbePaceMs = 1500;
@@ -1137,7 +1140,14 @@ namespace XAU.ViewModels.Pages
             if (!TitleBoundSisuEnabled())
                 return;
             // Native init rejects TitleId 0; TryCanonicalTitleId also rejects it.
-            if (!PresenceVerification.TryCanonicalTitleId(titleId, out var numericTitle))
+            // The title asked of SISU is the override when given (the Xbox App's own
+            // title), otherwise the game being presented.
+            var sisuTitleInput = string.IsNullOrWhiteSpace(SisuTitleOverride)
+                ? Environment.GetEnvironmentVariable("XAU_SISU_TITLE")
+                : SisuTitleOverride;
+            if (string.IsNullOrWhiteSpace(sisuTitleInput))
+                sisuTitleInput = titleId;
+            if (!PresenceVerification.TryCanonicalTitleId(sisuTitleInput, out var numericTitle))
                 return;
             var canonicalTitle = numericTitle.ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (_titleSisuAttemptedTitleId == canonicalTitle)
@@ -1151,7 +1161,7 @@ namespace XAU.ViewModels.Pages
 
             try
             {
-                EventsLog($"Title-bound SISU experiment: profile=NativeContextV2; contract=2; title_id={canonicalTitle}");
+                EventsLog($"Title-bound SISU experiment: profile=NativeContextV2; contract=2; title_id={canonicalTitle}; game_title={titleId}");
                 var sisuResult = await xboxSignedClient.SisuAuth(new XboxSisuAuthRequest
                 {
                     Profile = XboxSisuProfile.NativeContextV2,
