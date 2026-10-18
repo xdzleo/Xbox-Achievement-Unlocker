@@ -23,7 +23,5 @@
     <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/XboxAuthXuiClaimNames.cs" Link="Source/XboxAuthXuiClaimNames.cs" />
     <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/XboxAuthException.cs" Link="Source/XboxAuthException.cs" />
     <Compile Include="../../XAU/Util/XboxAuthNet/ErrorHelper.cs" Link="Source/ErrorHelper.cs" />
-    <Compile Include="../../XAU/Models/XboxApiRequest.cs" Link="Source/XboxApiRequest.cs" />
-    <Compile Include="../../XAU/Util/Constants/Constants.cs" Link="Source/Constants.cs" />
   </ItemGroup>
 </Project>

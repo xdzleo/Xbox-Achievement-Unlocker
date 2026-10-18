@@ -87,7 +87,7 @@ public class XboxRestAPI
 
     private async Task<bool> SendPresenceAsync(string xuid, string titleId)
     {
-        if (string.IsNullOrWhiteSpace(titleId))
+        if (!uint.TryParse(titleId, out var numericTitleId))
             return false;
         if (string.IsNullOrWhiteSpace(_xauth))
         {
@@ -98,7 +98,7 @@ public class XboxRestAPI
         try
         {
             SetPresenceHeaders();
-            var body = new PresenceTitleRequest { id = titleId };
+            var body = new PresenceTitleRequest { id = numericTitleId };
             var response = await _spooferClient.PostAsync(
                 string.Format(InterpolatedXboxAPIUrls.PresenceUrl, xuid),
                 new StringContent(JsonConvert.SerializeObject(body), Encoding.UTF8, HeaderValues.Accept));
