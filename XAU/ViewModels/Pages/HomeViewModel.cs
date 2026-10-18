@@ -495,6 +495,7 @@ namespace XAU.ViewModels.Pages
             {
                 XAUTH = mostCommon;
                 PresenceXAUTH = mostCommon;
+                EventsLog($"Memory XAUTH metadata: {DescribeXauthMetadata(mostCommon)}");
                 XAUTHTested = false;
             }
         }
@@ -972,9 +973,12 @@ namespace XAU.ViewModels.Pages
                 }
 
                 XAUTH = $"XBL3.0 x={authorizationToken.XuiClaims.UserHash};{authorizationToken.Token}";
+                EventsLog($"OAuth normal XAUTH metadata: {DescribeXauthMetadata(XAUTH)}");
                 stage = "presence-xsts";
                 PresenceXAUTH = await BuildPresenceXauthAsync(sisuResult, deviceToken, response.AccessToken) ?? "";
                 EventsLog($"OAuth presence token: available={!string.IsNullOrWhiteSpace(PresenceXAUTH)}");
+                if (!string.IsNullOrWhiteSpace(PresenceXAUTH))
+                    EventsLog($"OAuth presence XAUTH metadata: {DescribeXauthMetadata(PresenceXAUTH)}");
 
                 var xui = authorizationToken.XuiClaims;
                 XUIDOnly = xui?.XboxUserId ?? "";
@@ -1122,6 +1126,35 @@ namespace XAU.ViewModels.Pages
             // the diagnostic file. The exception type and stage are sufficient
             // to reproduce protocol failures without exposing credentials.
             return ex.GetType().Name;
+        }
+
+        private static string DescribeXauthMetadata(string xauth)
+        {
+            try
+            {
+                var marker = "XBL3.0 x=";
+                var start = xauth.IndexOf(marker, StringComparison.Ordinal);
+                var separator = xauth.IndexOf(';', start + marker.Length);
+                if (start < 0 || separator < 0)
+                    return "format=invalid";
+
+                var token = xauth[(separator + 1)..].Trim();
+                var segments = token.Split('.');
+                var x5t = "none";
+                if (segments.Length > 0)
+                {
+                    var encoded = segments[0].Replace('-', '+').Replace('_', '/');
+                    encoded = encoded.PadRight(encoded.Length + ((4 - encoded.Length % 4) % 4), '=');
+                    var header = JObject.Parse(Encoding.UTF8.GetString(Convert.FromBase64String(encoded)));
+                    x5t = (string?)header["x5t"] ?? (string?)header["kid"] ?? "none";
+                }
+
+                return $"length={token.Length}; segments={segments.Length}; x5t={x5t}";
+            }
+            catch
+            {
+                return "format=unreadable";
+            }
         }
         private void ClearProfileState()
         {

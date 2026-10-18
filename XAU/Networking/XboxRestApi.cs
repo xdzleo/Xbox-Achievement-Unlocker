@@ -97,10 +97,12 @@ public class XboxRestAPI
             var response = await _spooferClient.PostAsync(
                 string.Format(InterpolatedXboxAPIUrls.PresenceUrl, xuid),
                 new StringContent(JsonConvert.SerializeObject(body), Encoding.UTF8, HeaderValues.Accept));
+            HomeViewModel.EventsLog($"Presence POST => {(int)response.StatusCode} {response.StatusCode}");
             return response.IsSuccessStatusCode;
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
+            HomeViewModel.EventsLog($"Presence POST transport failure: {ex.GetType().Name}");
             return false;
         }
     }
@@ -273,9 +275,10 @@ public class XboxRestAPI
                 }
             }
         };
-        await _spooferClient.PostAsync(
+        var heartbeatResponse = await _spooferClient.PostAsync(
         string.Format(InterpolatedXboxAPIUrls.HeartbeatUrl, xuid),
         new StringContent(JsonConvert.SerializeObject(heartbeatRequest), Encoding.UTF8, HeaderValues.Accept));
+        HomeViewModel.EventsLog($"Heartbeat POST => {(int)heartbeatResponse.StatusCode} {heartbeatResponse.StatusCode}");
     }
 
     public async Task StopHeartbeatAsync(string xuid)
