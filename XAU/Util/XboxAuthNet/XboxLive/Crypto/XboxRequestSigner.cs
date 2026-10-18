@@ -17,19 +17,37 @@ namespace XboxAuthNet.XboxLive.Crypto
         public string SignRequest(string reqUri, string token, string body)
         {
             var timestamp = getWindowsTimestamp();
-            var data = generatePayload(timestamp, reqUri, token, body);
+            var data = generatePayload(timestamp, "POST", reqUri, token, body);
             var signature = sign(timestamp, data);
             return Convert.ToBase64String(signature);
         }
 
-        private byte[] generatePayload(ulong windowsTimestamp, string uri, string token, string payload)
+        // NSAL SignaturePolicy version 1 (ES256, type XBL) for a service call
+        // made with an XSTS token issued to this ProofKey. The public default
+        // NSAL maps *.xboxlive.com (userpresence, presence-heartbeat) to
+        // SignaturePolicyIndex 0, whose MaxBodyBytes is 8192. Service calls
+        // carry their Authorization header value in the signed payload.
+        public const int DefaultServiceMaxBodyBytes = 8192;
+
+        public string SignServiceRequest(string method, string reqUri, string authorization, string body, int maxBodyBytes = DefaultServiceMaxBodyBytes)
+        {
+            if (string.IsNullOrEmpty(method))
+                throw new ArgumentException("HTTP method is required", nameof(method));
+            if (body.Length > maxBodyBytes)
+                body = body.Substring(0, maxBodyBytes);
+            var timestamp = getWindowsTimestamp();
+            var data = generatePayload(timestamp, method.ToUpperInvariant(), reqUri, authorization ?? "", body);
+            return Convert.ToBase64String(sign(timestamp, data));
+        }
+
+        private byte[] generatePayload(ulong windowsTimestamp, string method, string uri, string token, string payload)
         {
             var pathAndQuery = new Uri(uri).PathAndQuery;
 
             var allocSize =
                 4 + 1 +
                 8 + 1 +
-                4 + 1 +
+                method.Length + 1 +
                 pathAndQuery.Length + 1 +
                 token.Length + 1 +
                 payload.Length + 1;
@@ -46,7 +64,7 @@ namespace XboxAuthNet.XboxLive.Crypto
             Array.Copy(windowsTimestampBytes, 0, bytes, 5, 8);
 
             var strs =
-                $"POST\0" +
+                $"{method}\0" +
                 $"{pathAndQuery}\0" +
                 $"{token}\0" +
                 $"{payload}\0";

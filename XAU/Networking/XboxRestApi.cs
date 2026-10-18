@@ -21,16 +21,16 @@ public class XboxRestAPI
     private readonly string _requestedResponseLanguage;
     private readonly string? _cloudHint;
     private readonly string? _storeHint;
-    private readonly string? _presenceSignature;
+    private readonly XboxAuthNet.XboxLive.Crypto.XboxRequestSigner? _presenceSigner;
     private readonly string? _presenceTokenTitleId;
 
-    public XboxRestAPI(string xauth, string? cloudHint = null, string? storeHint = null, string? presenceSignature = null, string? presenceTokenTitleId = null)
+    public XboxRestAPI(string xauth, string? cloudHint = null, string? storeHint = null, string? presenceTokenTitleId = null, XboxAuthNet.XboxLive.Crypto.XboxRequestSigner? presenceSigner = null)
     {
         _xauth = xauth;
         _presenceTokenTitleId = presenceTokenTitleId;
         _cloudHint = cloudHint;
         _storeHint = storeHint;
-        _presenceSignature = presenceSignature;
+        _presenceSigner = presenceSigner;
         _requestedResponseLanguage = HomeViewModel.Settings.RegionOverride ? "en-GB" : System.Globalization.CultureInfo.CurrentCulture.Name;
         var handler = new HttpClientHandler()
         {
@@ -96,11 +96,23 @@ public class XboxRestAPI
             _spooferClient.DefaultRequestHeaders.Add(HeaderNames.CloudHint, _cloudHint);
         if (!string.IsNullOrWhiteSpace(_storeHint))
             _spooferClient.DefaultRequestHeaders.Add(HeaderNames.StoreHint, _storeHint);
-        // The native provider supplies this only when a request-bound
-        // signature is available. Do not synthesize one from XBL3.0.
-        if (!string.IsNullOrWhiteSpace(_presenceSignature))
-            _spooferClient.DefaultRequestHeaders.Add(HeaderNames.Signature, _presenceSignature);
     }
+
+    // xgameruntime FUN_180256198 adds Signature when the token provider
+    // returned one (+0x98/+0xa8). XAU can only produce it for an XSTS issued
+    // to the ProofKey it holds; otherwise the request goes unsigned.
+    private Task<HttpResponseMessage> SendPresenceServiceAsync(HttpMethod method, string url, string? body)
+    {
+        var request = new HttpRequestMessage(method, url);
+        if (body != null)
+            request.Content = new StringContent(body, Encoding.UTF8, HeaderValues.Accept);
+        if (_presenceSigner != null)
+            request.Headers.TryAddWithoutValidation(HeaderNames.Signature,
+                _presenceSigner.SignServiceRequest(method.Method, url, _xauth, body ?? ""));
+        return _spooferClient.SendAsync(request);
+    }
+
+    private string SignedLabel => _presenceSigner != null ? "signed=True" : "signed=False";
 
     private async Task<bool> SendPresenceAsync(string xuid, string titleId)
     {
@@ -133,11 +145,10 @@ public class XboxRestAPI
         try
         {
             SetPresenceHeaders();
-            var body = new PresenceStateRequest();
-            var response = await _spooferClient.PostAsync(
+            var response = await SendPresenceServiceAsync(HttpMethod.Post,
                 string.Format(InterpolatedXboxAPIUrls.PresenceUrl, xuid),
-                new StringContent(JsonConvert.SerializeObject(body), Encoding.UTF8, HeaderValues.Accept));
-            HomeViewModel.EventsLog($"Presence POST => {(int)response.StatusCode} {response.StatusCode}; binding={binding}; {await DescribeFailureAsync(response)}");
+                JsonConvert.SerializeObject(new PresenceStateRequest()));
+            HomeViewModel.EventsLog($"Presence POST => {(int)response.StatusCode} {response.StatusCode}; binding={binding}; {SignedLabel}; {await DescribeFailureAsync(response)}");
             if (!response.IsSuccessStatusCode)
                 return false;
 
@@ -157,10 +168,10 @@ public class XboxRestAPI
         try
         {
             SetPresenceHeaders();
-            var response = await _spooferClient.GetAsync(string.Format(InterpolatedXboxAPIUrls.PresenceReadUrl, xuid));
+            var response = await SendPresenceServiceAsync(HttpMethod.Get, string.Format(InterpolatedXboxAPIUrls.PresenceReadUrl, xuid), null);
             if (!response.IsSuccessStatusCode)
             {
-                HomeViewModel.EventsLog($"Presence readback GET => {(int)response.StatusCode} {response.StatusCode}; {await DescribeFailureAsync(response)}");
+                HomeViewModel.EventsLog($"Presence readback GET => {(int)response.StatusCode} {response.StatusCode}; {SignedLabel}; {await DescribeFailureAsync(response)}");
                 return false;
             }
 
@@ -349,10 +360,12 @@ public class XboxRestAPI
                 }
             }
         };
-        var heartbeatResponse = await _spooferClient.PostAsync(
-        string.Format(InterpolatedXboxAPIUrls.HeartbeatUrl, xuid),
-        new StringContent(JsonConvert.SerializeObject(heartbeatRequest), Encoding.UTF8, HeaderValues.Accept));
-        HomeViewModel.EventsLog($"Heartbeat POST => {(int)heartbeatResponse.StatusCode} {heartbeatResponse.StatusCode}; {await DescribeFailureAsync(heartbeatResponse)}");
+        // presence-heartbeat.xboxlive.com falls under the same *.xboxlive.com
+        // NSAL entry (SignaturePolicyIndex 0) as userpresence.
+        var heartbeatResponse = await SendPresenceServiceAsync(HttpMethod.Post,
+            string.Format(InterpolatedXboxAPIUrls.HeartbeatUrl, xuid),
+            JsonConvert.SerializeObject(heartbeatRequest));
+        HomeViewModel.EventsLog($"Heartbeat POST => {(int)heartbeatResponse.StatusCode} {heartbeatResponse.StatusCode}; {SignedLabel}; {await DescribeFailureAsync(heartbeatResponse)}");
         if (heartbeatResponse.IsSuccessStatusCode)
             await ReadBackPresenceAsync(xuid, spoofedTitleId);
     }

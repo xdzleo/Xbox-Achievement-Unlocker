@@ -1,5 +1,55 @@
 # OAuth presence fix
 
+## Request signature on presence calls (v0.1.10)
+
+**Observation (Ghidra 12.1.4 via REA, xgameruntime.dll SHA-256
+`246b0b4de55f4395a78d341fd75d6d4309d16f4a5c76de9c440ea00c3a710d45`).**
+
+| Field | Native (`FUN_180256bd8` request prep, `FUN_180256198` final headers) | XAU before |
+|---|---|---|
+| Method/URL | POST `%s/users/xuid(%llu)/devices/current/titles/current` | same |
+| `x-xbl-contract-version` | `DAT_18037bafc` = `"3"` (read from file bytes) | `3` |
+| `Content-Type` | `application/json; charset=utf-8` | same |
+| Body | `{"state":"active"}` (`FUN_180257230`) | same |
+| `x-xbl-cloud-hint` / `x-xbl-store-hint` | always inserted from +0x118 / +0x138 | omitted (values unknown) |
+| `Authorization` | provider result, added when +0x88 length != 0 | presence XAUTH |
+| `Signature` | provider result, added when +0xa8 length != 0 | **never computed** |
+
+`FUN_1802566f4` gets both values from the provider at +0xf0, vtable slot
++0x50, after checking the user at +0xe8 is signed in. Its strings name the
+operation `GetTokenAndSignatureOnInactivePresence` / XAL
+`GetTokenAndSignature`, which resolves the request URL through the NSAL
+(`SignaturePolicies`, `SignaturePolicyIndex`, `%s/titles/current/endpoints`).
+
+**Observation (public NSAL, `title.mgt.xboxlive.com/titles/default/endpoints`).**
+`*.xboxlive.com` (which covers `userpresence` and `presence-heartbeat`) maps
+to `RelyingParty http://xboxlive.com`, `SignaturePolicyIndex 0`: version 1,
+ES256, `MaxBodyBytes 8192`, type `XBL`. `http://xboxlive.com` is also the
+only RP for which XAU's presence XSTS succeeds.
+
+**Change.** When the presence XSTS came from the signed XSTS request, XAU
+keeps the ProofKey signer it was issued to and signs the presence POST, the
+read-back GET and the heartbeat POST with it
+(`XboxRequestSigner.SignServiceRequest`: method, path+query, Authorization,
+body truncated to 8192). Tokens from the unsigned XSTS path or from process
+memory are sent unsigned, as before, because XAU does not hold their key.
+Logs now carry `signed=True|False`.
+
+**Confidence / limits.** The header positions and the NSAL policy are
+observed. The XBL v1 payload layout (Authorization value included for
+service calls) follows XAU's existing auth signer and public implementations;
+the XAL signer body inside this DLL was not decompiled. Cloud/store hint
+values remain unknown and are not invented. Whether the service enforces the
+signature for presence is decided only by a live read-back.
+
+**Device token difference (recorded, not changed).** Native
+`FUN_1802a2c70` sends an anonymous ProofOfPossession device request only
+when the RPS string at +0x170/+0x180 is empty; otherwise it sends
+`RpsTicket` + `SiteName` (an MSA-authenticated device). XAU always sends the
+anonymous form with a random `SerialNumber`. The source of the native device
+RPS ticket is not recovered.
+
+
 ## Title binding of the state-only write (v0.1.9)
 
 **Observation (user log, 2026-10-18 15:54, v0.1.8 build).** SISU contract 1

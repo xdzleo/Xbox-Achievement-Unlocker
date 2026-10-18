@@ -43,6 +43,9 @@ internal static class Program
         await Run("state-only presence write is bound only to the token title", StateOnlyPresenceBindsToTokenTitle);
         await Run("presence readback confirms only the requested active title", PresenceReadbackConfirmsRequestedTitle);
         await Run("presence readback rejects malformed or foreign bodies", PresenceReadbackRejectsMalformed);
+        await Run("service signature covers method, path+query, Authorization and body", ServiceSignatureCoversRequest);
+        await Run("service signature truncates body at policy MaxBodyBytes", ServiceSignatureTruncatesBody);
+        await Run("auth signature keeps POST and empty token layout", AuthSignatureKeepsLegacyLayout);
         Console.WriteLine($"PASS: {_passed} offline XboxAuthNet contract tests");
         return 0;
     }
@@ -108,6 +111,73 @@ internal static class Program
             Assert(!result.RequestedTitleActive, $"body {body ?? "null"} must not confirm presence");
         }
         Assert(!PresenceVerification.ParseReadback("{\"devices\":[]}", "0").Parsed, "invalid requested title is not parsed");
+        return Task.CompletedTask;
+    }
+
+    private sealed class EcdsaPop : IPopCryptoProvider
+    {
+        public readonly System.Security.Cryptography.ECDsa Key =
+            System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+        public object ProofKey => new { kty = "EC" };
+        public byte[] Sign(byte[] data) => Key.SignData(data, System.Security.Cryptography.HashAlgorithmName.SHA256);
+    }
+
+    // Rebuilds the XBL v1 payload from the timestamp carried in the header and
+    // verifies the ES256 signature with the public key.
+    private static bool VerifyXblSignature(EcdsaPop pop, string header, string method, string pathAndQuery, string authorization, string body)
+    {
+        var raw = Convert.FromBase64String(header);
+        if (raw.Length != 12 + 64 || raw[0] != 0 || raw[1] != 0 || raw[2] != 0 || raw[3] != 1)
+            return false;
+        var payload = new List<byte> { 0, 0, 0, 1, 0 };
+        payload.AddRange(raw.Skip(4).Take(8));
+        payload.Add(0);
+        payload.AddRange(Encoding.ASCII.GetBytes($"{method}\0{pathAndQuery}\0{authorization}\0{body}\0"));
+        return pop.Key.VerifyData(payload.ToArray(), raw.Skip(12).ToArray(), System.Security.Cryptography.HashAlgorithmName.SHA256);
+    }
+
+    private static Task ServiceSignatureCoversRequest()
+    {
+        var pop = new EcdsaPop();
+        var signer = new XboxRequestSigner(pop);
+        const string auth = "XBL3.0 x=123;synthetic.token";
+        const string body = "{\"state\":\"active\"}";
+        const string url = "https://userpresence.xboxlive.com/users/xuid(2535400000000000)/devices/current/titles/current";
+
+        var header = signer.SignServiceRequest("post", url, auth, body);
+        Assert(VerifyXblSignature(pop, header, "POST", "/users/xuid(2535400000000000)/devices/current/titles/current", auth, body),
+            "POST signature verifies with method upper-cased, path, Authorization and body");
+        Assert(!VerifyXblSignature(pop, header, "POST", "/users/xuid(2535400000000000)/devices/current/titles/current", "XBL3.0 x=999;other", body),
+            "signature is bound to the Authorization value");
+        Assert(!VerifyXblSignature(pop, header, "POST", "/users/xuid(2535400000000000)/devices/current/titles/current", auth, "{\"state\":\"inactive\"}"),
+            "signature is bound to the body");
+
+        var read = signer.SignServiceRequest("GET", "https://userpresence.xboxlive.com/users/xuid(1)?level=all", auth, "");
+        Assert(VerifyXblSignature(pop, read, "GET", "/users/xuid(1)?level=all", auth, ""), "GET signature includes the query string");
+        Assert(!VerifyXblSignature(pop, read, "POST", "/users/xuid(1)?level=all", auth, ""), "signature is bound to the method");
+
+        var timestamp = BitConverter.ToUInt64(Convert.FromBase64String(read).Skip(4).Take(8).Reverse().ToArray());
+        var unix = (long)(timestamp / 10_000_000UL) - 11644473600L;
+        Assert(Math.Abs(unix - DateTimeOffset.UtcNow.ToUnixTimeSeconds()) < 300, "header carries a current Windows FILETIME timestamp");
+        return Task.CompletedTask;
+    }
+
+    private static Task ServiceSignatureTruncatesBody()
+    {
+        var pop = new EcdsaPop();
+        var signer = new XboxRequestSigner(pop);
+        Assert(XboxRequestSigner.DefaultServiceMaxBodyBytes == 8192, "default matches NSAL SignaturePolicies[0].MaxBodyBytes");
+        var header = signer.SignServiceRequest("POST", "https://presence-heartbeat.xboxlive.com/users/xuid(1)/devices/current/", "XBL3.0 x=1;t", "abcdefgh", maxBodyBytes: 4);
+        Assert(VerifyXblSignature(pop, header, "POST", "/users/xuid(1)/devices/current/", "XBL3.0 x=1;t", "abcd"), "only the first MaxBodyBytes are signed");
+        return Task.CompletedTask;
+    }
+
+    private static Task AuthSignatureKeepsLegacyLayout()
+    {
+        var pop = new EcdsaPop();
+        var signer = new XboxRequestSigner(pop);
+        var header = signer.SignRequest("https://xsts.auth.xboxlive.com/xsts/authorize", "", "{}");
+        Assert(VerifyXblSignature(pop, header, "POST", "/xsts/authorize", "", "{}"), "auth requests still sign POST with an empty token");
         return Task.CompletedTask;
     }
 

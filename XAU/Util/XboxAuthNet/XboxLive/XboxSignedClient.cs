@@ -22,6 +22,10 @@ public class XboxSignedClient
         _httpClient = httpClient;
     }
 
+    // The ProofKey holder. Service calls made with an XSTS token issued by
+    // RequestSignedXstsToken must be signed with this same key.
+    public IXboxRequestSigner Signer => _signer;
+
     public Task<XboxAuthResponse> RequestSignedUserToken(string rps) =>
         RequestSignedUserToken(new XboxSignedUserTokenRequest()
         {

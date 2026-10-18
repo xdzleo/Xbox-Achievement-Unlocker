@@ -104,6 +104,10 @@ namespace XAU.ViewModels.Pages
         // Title claim (xti.tid) of PresenceXAUTH when it came from an XSTS
         // response. Empty means unknown (e.g. a token read from process memory).
         public static string PresenceTitleId = "";
+        // ProofKey signer that PresenceXAUTH was issued to. Only set when the
+        // presence XSTS came from the signed request; tokens from the unsigned
+        // XSTS path or process memory are not bound to a key XAU holds.
+        public static XboxAuthNet.XboxLive.Crypto.XboxRequestSigner? PresenceSigner;
         public static string XUIDOnly;
         public static bool InitComplete = false;
         private bool _isInitialized = false;
@@ -499,6 +503,7 @@ namespace XAU.ViewModels.Pages
                 XAUTH = mostCommon;
                 PresenceXAUTH = mostCommon;
                 PresenceTitleId = "";
+                PresenceSigner = null;
                 EventsLog($"Memory XAUTH metadata: {DescribeXauthMetadata(mostCommon)}");
                 XAUTHTested = false;
             }
@@ -985,6 +990,7 @@ namespace XAU.ViewModels.Pages
                 EventsLog($"OAuth normal XAUTH metadata: {DescribeXauthMetadata(XAUTH)}");
                 stage = "presence-xsts";
                 PresenceTitleId = "";
+                PresenceSigner = null;
                 PresenceXAUTH = await BuildPresenceXauthAsync(sisuResult, deviceToken, response.AccessToken) ?? "";
                 EventsLog($"OAuth presence token: available={!string.IsNullOrWhiteSpace(PresenceXAUTH)}");
                 if (!string.IsNullOrWhiteSpace(PresenceXAUTH))
@@ -1098,6 +1104,8 @@ namespace XAU.ViewModels.Pages
                             {
                                 EventsLog($"Presence XSTS succeeded with relying party {relyingParty}; claims={(claimSet == null ? "base" : "mgt,mgs,umg")}");
                                 RecordPresenceTitle(signedXsts);
+                                PresenceSigner = xboxSignedClient.Signer as XboxAuthNet.XboxLive.Crypto.XboxRequestSigner;
+                                EventsLog($"Presence request signing: available={PresenceSigner != null}");
                                 return $"XBL3.0 x={signedXsts.XuiClaims.UserHash};{signedXsts.Token}";
                             }
                         }
@@ -1124,6 +1132,7 @@ namespace XAU.ViewModels.Pages
                             {
                                 EventsLog($"Unsigned presence XSTS succeeded with relying party {relyingParty}; claims={(claimSet == null ? "base" : "mgt,mgs,umg")}");
                                 RecordPresenceTitle(unsignedXsts);
+                                PresenceSigner = null;
                                 return $"XBL3.0 x={unsignedXsts.XuiClaims.UserHash};{unsignedXsts.Token}";
                             }
                         }

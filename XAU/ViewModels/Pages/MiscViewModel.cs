@@ -24,7 +24,8 @@ namespace XAU.ViewModels.Pages
 
         private XboxRestAPI PresenceApi() => new XboxRestAPI(
             HomeViewModel.PresenceXAUTH,
-            presenceTokenTitleId: HomeViewModel.PresenceTitleId);
+            presenceTokenTitleId: HomeViewModel.PresenceTitleId,
+            presenceSigner: HomeViewModel.PresenceSigner);
 
 
 
