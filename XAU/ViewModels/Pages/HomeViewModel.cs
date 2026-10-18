@@ -935,8 +935,40 @@ namespace XAU.ViewModels.Pages
             });
             try
             {
-                XAUTH = $"XBL3.0 x={sisuResult.AuthorizationToken.XuiClaims.UserHash};{sisuResult.AuthorizationToken.Token}";
-                var xui = sisuResult.AuthorizationToken.XuiClaims;
+                // SISU returns UserToken, TitleToken and AuthorizationToken.
+                // The latter is sufficient for profile/achievement reads but
+                // is not guaranteed to carry the title/sandbox claims that
+                // userpresence validates. Re-issue the final XSTS token with
+                // all three identity tokens and the PoP key, matching the
+                // Xbox App's title-aware path.
+                var userToken = sisuResult.UserToken?.Token;
+                var titleToken = sisuResult.TitleToken?.Token;
+                var returnedDeviceToken = sisuResult.DeviceToken;
+                if (string.IsNullOrWhiteSpace(userToken)
+                    || string.IsNullOrWhiteSpace(titleToken)
+                    || string.IsNullOrWhiteSpace(returnedDeviceToken))
+                {
+                    throw new InvalidOperationException("SISU did not return UserToken, TitleToken and DeviceToken required for presence");
+                }
+
+                var presenceToken = await xboxSignedClient.RequestSignedXstsToken(new XboxSignedXstsRequest
+                {
+                    UserToken = userToken,
+                    DeviceToken = returnedDeviceToken,
+                    TitleToken = titleToken,
+                    RelyingParty = XboxAuthConstants.XboxLiveRelyingParty,
+                    OptionalDisplayClaims = new[] { "xui", "xti" }
+                });
+
+                if (!presenceToken.Validate() || presenceToken.XuiClaims == null
+                    || string.IsNullOrWhiteSpace(presenceToken.XuiClaims.UserHash)
+                    || string.IsNullOrWhiteSpace(presenceToken.XuiClaims.XboxUserId))
+                {
+                    throw new InvalidOperationException("Final XSTS token is missing user identity claims");
+                }
+
+                XAUTH = $"XBL3.0 x={presenceToken.XuiClaims.UserHash};{presenceToken.Token}";
+                var xui = presenceToken.XuiClaims;
                 XUIDOnly = xui?.XboxUserId ?? "";
                 if (!string.IsNullOrEmpty(XUIDOnly))
                 {
