@@ -1,5 +1,35 @@
 # OAuth presence fix
 
+## SISU OAuth regression correction
+
+The user's 2026-10-18 log records three `sisu` HTTP 400 failures at
+15:36:03, 15:36:35 and 15:36:49, before the XSTS/presence stages. No XErr or
+message was available. Earlier log entries completed SISU. Comparing source
+profiles shows that v0.1.6 sent contract 1, while the subsequent RE probe
+forced contract 2 without supplying the native TitleId context. The log does
+not retain the response body or identify the exact server validation rule.
+
+`XboxSisuAuthRequest` now defaults to `OAuthCompatibility`, restoring the
+contract-1 header and exact existing OAuth body. `HomeViewModel` selects this
+profile explicitly and logs its name/version. Native-only fields are rejected
+locally in that profile instead of silently mixing contexts. There is no
+automatic retry with another contract or account.
+
+The RE-derived contract 2 remains available as explicit `NativeContextV2`.
+It requires a decimal UInt64 TitleId before sending and canonicalizes it like
+the native `%llu` writer. Session/UCS/consent/affinity continuation belongs to
+this profile. These are adapter preconditions; full native context acquisition
+and service acceptance remain unproven.
+
+A separate local parser defect is also corrected: both known spellings of
+`UseModernGamertag` now accept nullable JSON booleans. A malformed successful
+response is reported as `invalid_response`, distinct from `http_error`, with
+only the response byte count added to diagnostics. This parser change does
+not explain an HTTP 400 sent by the service.
+
+The correction restores the previous OAuth request contract. Live recovery
+of this user's login, and live presence, still require a new controlled test.
+
 The OAuth path previously built `XAUTH` directly from SISU's
 `AuthorizationToken`. SISU can also return `UserToken`, `TitleToken`, and a
 device token. The explicit XSTS path below is a protocol comparison probe.
@@ -52,7 +82,8 @@ The SISU request also exposes the native contract-2 fields `TitleId`,
 `SessionId`, `UcsCheckinToken`, `UcsWebToken`, `UserPrompts`, `Flow`, and a
 configurable sandbox. The response parser retains sibling `xti.tid` and `sbx`
 claims so the presence path can reject a configured title mismatch. These
-fields remain optional until a provider supplies the corresponding context.
+fields are available only in the explicit native profile; its TitleId is
+required, while the remaining context is supplied by a provider when present.
 
 ## Response continuation recovered from native code
 

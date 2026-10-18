@@ -25,7 +25,14 @@ namespace XboxAuthNet.XboxLive.Responses
         [JsonPropertyName("Sandbox")]
         public string? Sandbox { get; set; }
 
+        [JsonPropertyName("UseModernGamertag")]
+        public bool? UseModernGamertag { get; set; }
+
+        // Accept the older response spelling without serializing a second field.
         [JsonPropertyName("UseModernGamerTag")]
-        public string? UseModernGamertag { get; set; }
+        public bool? LegacyUseModernGamertag
+        {
+            set => UseModernGamertag = value;
+        }
     }
 }

@@ -945,8 +945,10 @@ namespace XAU.ViewModels.Pages
                     throw new InvalidOperationException("Device token response did not contain a token");
 
                 stage = "sisu";
+                EventsLog("OAuth SISU request: profile=OAuthCompatibility; contract=1; native_context=False");
                 var sisuResult = await xboxSignedClient.SisuAuth(new XboxSisuAuthRequest
                 {
+                    Profile = XboxSisuProfile.OAuthCompatibility,
                     AccessToken = response.AccessToken,
                     ClientId = XboxGameTitles.XboxAppPC,
                     DeviceToken = deviceToken,
@@ -1008,7 +1010,7 @@ namespace XAU.ViewModels.Pages
                 EventsLog($"OAuth XAUTH failed at {stage}: {diagnostic}");
                 _snackbarService.Show("Error", $"Failed to generate XAUTH ({stage}). See Documents\\XAU\\events_debug.log", ControlAppearance.Danger, new SymbolIcon(SymbolRegular.ErrorCircle24), _snackbarDuration);
             }
-            LoginText = "Logout";
+            LoginText = IsLoggedIn ? "Logout" : "Login";
             XauthWorker_ProgressChanged(null, null);
             if (IsLoggedIn && !GrabbedProfile)
                 GrabProfile();
@@ -1152,7 +1154,7 @@ namespace XAU.ViewModels.Pages
             {
                 var xerr = string.IsNullOrWhiteSpace(auth.Error) ? "none" : auth.Error;
                 var message = string.IsNullOrWhiteSpace(auth.ErrorMessage) ? "none" : auth.ErrorMessage;
-                return $"status={auth.StatusCode}; xerr={xerr}; message={message}";
+                return $"status={auth.StatusCode}; kind={auth.FailureKind}; response_bytes={auth.ResponseBodyBytes?.ToString() ?? "unknown"}; xerr={xerr}; message={message}";
             }
 
             // Never write OAuth, device, title, user, or XSTS token material to

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading.Tasks;
 using System.Net.Http;
 using XboxAuthNet.XboxLive.Responses;
@@ -7,8 +8,17 @@ using XboxAuthNet.XboxLive.Crypto;
 
 namespace XboxAuthNet.XboxLive.Requests
 {
+    public enum XboxSisuProfile
+    {
+        OAuthCompatibility,
+        NativeContextV2
+    }
+
     public class XboxSisuAuthRequest : AbstractXboxSignedAuthRequest
     {
+        // The existing OAuth caller has no native title/UCS context. Keep its
+        // established contract instead of assuming native v2 is interchangeable.
+        public XboxSisuProfile Profile { get; set; } = XboxSisuProfile.OAuthCompatibility;
         public string? TokenPrefix { get; set; } = XboxAuthConstants.XboxTokenPrefix;
         public string? AccessToken { get; set; }
         public string? RelyingParty { get; set; } = XboxAuthConstants.XboxLiveRelyingParty;
@@ -23,8 +33,12 @@ namespace XboxAuthNet.XboxLive.Requests
         public bool RequestConsent { get; set; }
         public string? Sandbox { get; set; } = "RETAIL";
 
-        // xgameruntime.dll emits contract 2 for the native SISU serializer.
-        protected override string ContractVersion => "2";
+        protected override string ContractVersion => Profile switch
+        {
+            XboxSisuProfile.OAuthCompatibility => "1",
+            XboxSisuProfile.NativeContextV2 => "2",
+            _ => throw new InvalidOperationException("Unsupported SISU profile")
+        };
 
         // Continuation is explicit and scoped to a single operation/account.
         // Missing headers clear older values instead of borrowing another session.
@@ -61,21 +75,40 @@ namespace XboxAuthNet.XboxLive.Requests
                 throw new InvalidOperationException("AccessToken was null");
             if (string.IsNullOrEmpty(RelyingParty))
                 throw new InvalidOperationException("RelyingParty was null");
-                
+
+            string? wireTitleId = null;
+            switch (Profile)
+            {
+                case XboxSisuProfile.OAuthCompatibility:
+                    if (TitleId != null || SessionId != null || ClusterAffinity != null
+                        || UcsCheckinToken != null || UcsWebToken != null
+                        || UserPrompts != null || RequestConsent)
+                        throw new InvalidOperationException("Native SISU fields require the explicit native profile");
+                    break;
+                case XboxSisuProfile.NativeContextV2:
+                    // The observed native builder formats the configured uint64
+                    // TitleId with %llu. An OAuth AppId is not a substitute.
+                    if (!ulong.TryParse(TitleId, NumberStyles.None, CultureInfo.InvariantCulture, out var title))
+                        throw new InvalidOperationException("Native SISU requires a decimal UInt64 TitleId");
+                    wireTitleId = title.ToString(CultureInfo.InvariantCulture);
+                    break;
+                default:
+                    throw new InvalidOperationException("Unsupported SISU profile");
+            }
+
             var body = new Dictionary<string, object?>
             {
-                ["AccessToken"] = TokenPrefix + AccessToken,
-                ["AppId"] = ClientId,
-                ["TitleId"] = TitleId,
-                ["DeviceToken"] = DeviceToken,
-                ["Sandbox"] = Sandbox,
-                ["UseModernGamertag"] = true,
-                ["SiteName"] = "user.auth.xboxlive.com",
-                ["RelyingParty"] = RelyingParty
+                ["AccessToken"] = TokenPrefix + AccessToken
             };
-            // Dictionary null entries are not removed by WhenWritingNull.
-            foreach (var key in new[] { "AppId", "TitleId", "DeviceToken", "Sandbox" })
-                if (body[key] == null) body.Remove(key);
+            // Insert only present fields: removing a dictionary entry and then
+            // appending ProofKey can reuse its slot and change signed byte order.
+            if (ClientId != null) body["AppId"] = ClientId;
+            if (wireTitleId != null) body["TitleId"] = wireTitleId;
+            if (DeviceToken != null) body["DeviceToken"] = DeviceToken;
+            if (Sandbox != null) body["Sandbox"] = Sandbox;
+            body["UseModernGamertag"] = true;
+            body["SiteName"] = "user.auth.xboxlive.com";
+            body["RelyingParty"] = RelyingParty;
             if (!string.IsNullOrEmpty(SessionId)) body["SessionId"] = SessionId;
             // FUN_1802a5960 gates the whole UCS group on both nonempty tokens.
             if (!string.IsNullOrEmpty(UcsCheckinToken) && !string.IsNullOrEmpty(UcsWebToken))

@@ -20,6 +20,8 @@ namespace XboxAuthNet.XboxLive
         }
 
         public int StatusCode { get; private set; }
+        public string FailureKind { get; internal set; } = "http_error";
+        public int? ResponseBodyBytes { get; internal set; }
         // Operation-local continuation data; never included in Message or JSON.
         [System.Text.Json.Serialization.JsonIgnore]
         public XboxSisuContext? SisuContext { get; internal set; }

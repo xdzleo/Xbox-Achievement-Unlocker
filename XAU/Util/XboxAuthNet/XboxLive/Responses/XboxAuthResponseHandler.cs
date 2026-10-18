@@ -41,28 +41,35 @@ namespace XboxAuthNet.XboxLive.Responses
                 ex is JsonException ||
                 ex is HttpRequestException)
             {
-                try
+                XboxAuthException error;
+                if (res.IsSuccessStatusCode)
                 {
-                    var error = XboxAuthException.FromResponseBody(resBody, (int)res.StatusCode);
-                    error.SisuContext = context;
-                    throw error;
+                    // Keep a local decode failure distinct from service rejection.
+                    // No raw response, JSON value or credential enters diagnostics.
+                    error = new XboxAuthException("invalid_response", "Invalid authentication response", null, (int)res.StatusCode);
+                    error.FailureKind = "invalid_response";
                 }
-                catch (FormatException)
+                else
                 {
                     try
                     {
-                        var error = XboxAuthException.FromResponseHeaders(res.Headers, (int)res.StatusCode);
-                        error.SisuContext = context;
-                        throw error;
+                        error = XboxAuthException.FromResponseBody(resBody, (int)res.StatusCode);
                     }
                     catch (FormatException)
                     {
-                        throw new XboxAuthException($"{(int)res.StatusCode}: {res.ReasonPhrase}", (int)res.StatusCode)
+                        try
                         {
-                            SisuContext = context
-                        };
+                            error = XboxAuthException.FromResponseHeaders(res.Headers, (int)res.StatusCode);
+                        }
+                        catch (FormatException)
+                        {
+                            error = new XboxAuthException($"{(int)res.StatusCode}: {res.ReasonPhrase}", (int)res.StatusCode);
+                        }
                     }
                 }
+                error.SisuContext = context;
+                error.ResponseBodyBytes = System.Text.Encoding.UTF8.GetByteCount(resBody);
+                throw error;
             }
         }
     }

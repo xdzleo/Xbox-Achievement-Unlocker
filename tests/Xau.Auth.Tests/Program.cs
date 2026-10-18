@@ -20,7 +20,15 @@ internal static class Program
         await Run("unsigned XSTS carries device and title tokens", UnsignedXstsCarriesAllTokenInputs);
         await Run("presence title request uses string title ID and fields", PresenceTitleRequestUsesWireShape);
         await Run("native presence request uses state-only body", NativePresenceStateRequestUsesWireShape);
+        await Run("SISU default OAuth profile preserves baseline body and signature", SisuOAuthDefaultPreservesBaseline);
+        await Run("SISU default OAuth omits optional null fields", SisuOAuthDefaultOmitsNullFields);
         await Run("SISU native contract is version 2 and keeps optional fields", SisuNativeContractAndFields);
+        await Run("SISU native title IDs are canonical UInt64 strings", SisuNativeTitleIdsAreCanonical);
+        await Run("SISU native title ID is required before signing or I/O", SisuNativeRejectsInvalidTitleIds);
+        await Run("SISU OAuth rejects every native-only field before signing or I/O", SisuOAuthRejectsNativeContext);
+        await Run("SISU OAuth rejects copied continuation before signing or I/O", SisuOAuthRejectsCopiedContinuation);
+        await Run("SISU successful modern gamertag flags support both wire spellings", SisuResponseModernGamertagFlags);
+        await Run("SISU malformed success keeps parse failure metadata and redacts body", SisuMalformedSuccessMetadata);
         await Run("SISU response retains operation-local continuation", SisuResponseRetainsContinuation);
         await Run("SISU challenge retains context without becoming success", SisuChallengeRetainsContext);
         await Run("SISU errors without WebPage have no continuation", SisuErrorsWithoutWebPage);
@@ -155,6 +163,7 @@ internal static class Program
         var signer = new RecordingSigner(new { alg = "ES256", key = "synthetic-proof-key" });
         await new XboxSisuAuthRequest
         {
+            Profile = XboxSisuProfile.NativeContextV2,
             AccessToken = "access",
             ClientId = "XboxAppPC",
             DeviceToken = "device",
@@ -178,6 +187,185 @@ internal static class Program
             "UseModernGamertag", "SiteName", "RelyingParty", "SessionId", "UcsCheckinToken",
             "UcsWebToken", "UserPrompts", "Flow", "ProofKey" };
         Assert(root.EnumerateObject().Select(p => p.Name).SequenceEqual(expectedOrder), "native SISU field order changed");
+        Assert(handler.Body == signer.Body, "native SISU signature input differs from wire body");
+        Assert(signer.Token == string.Empty, "native SISU must sign an empty token field");
+        Assert(handler.Request.Headers.GetValues("Signature").Single() == "synthetic-signature", "native SISU signature header missing");
+    }
+
+    private static async Task SisuOAuthDefaultPreservesBaseline()
+    {
+        var handler = new CaptureHandler("{}");
+        using var client = new HttpClient(handler);
+        var signer = new RecordingSigner(new { alg = "ES256", key = "synthetic-proof-key" });
+        var request = new XboxSisuAuthRequest
+        {
+            AccessToken = "synthetic-access",
+            ClientId = "synthetic-app",
+            DeviceToken = "synthetic-device"
+        };
+        Assert(request.Profile == XboxSisuProfile.OAuthCompatibility, "SISU default profile changed");
+        await request.Send(client, signer);
+
+        const string baselineBody = "{\"AccessToken\":\"t=synthetic-access\",\"AppId\":\"synthetic-app\",\"DeviceToken\":\"synthetic-device\",\"Sandbox\":\"RETAIL\",\"UseModernGamertag\":true,\"SiteName\":\"user.auth.xboxlive.com\",\"RelyingParty\":\"http://xboxlive.com\",\"ProofKey\":{\"alg\":\"ES256\",\"key\":\"synthetic-proof-key\"}}";
+        Assert(handler.Body == baselineBody, "default SISU body differs from the compatibility baseline");
+        Assert(signer.Body == baselineBody, "default SISU signer body differs from the compatibility baseline");
+        Assert(handler.Request!.RequestUri!.AbsoluteUri == "https://sisu.xboxlive.com/authorize", "default SISU endpoint changed");
+        Assert(signer.RequestUri == handler.Request.RequestUri.AbsoluteUri, "default SISU signer URI differs from the endpoint");
+        Assert(signer.Token == string.Empty, "default SISU must sign an empty token field");
+        Assert(handler.Request.Method == HttpMethod.Post, "default SISU method changed");
+        Assert(handler.Request.Headers.GetValues("x-xbl-contract-version").Single() == "1", "default SISU contract must be 1");
+        Assert(handler.Request.Headers.GetValues("Signature").Single() == "synthetic-signature", "default SISU signature header missing");
+        Assert(handler.Request.Headers.GetValues("Accept").Single() == "application/json", "default SISU common headers missing");
+        Assert(handler.Request.Content!.Headers.ContentType!.MediaType == "application/json", "default SISU content type changed");
+    }
+
+    private static async Task SisuOAuthDefaultOmitsNullFields()
+    {
+        var handler = new CaptureHandler("{}");
+        using var client = new HttpClient(handler);
+        var signer = new RecordingSigner(new { alg = "ES256" });
+        await new XboxSisuAuthRequest { AccessToken = "synthetic-access", Sandbox = null }.Send(client, signer);
+        const string baselineBody = "{\"AccessToken\":\"t=synthetic-access\",\"UseModernGamertag\":true,\"SiteName\":\"user.auth.xboxlive.com\",\"RelyingParty\":\"http://xboxlive.com\",\"ProofKey\":{\"alg\":\"ES256\"}}";
+        Assert(handler.Body == baselineBody && signer.Body == baselineBody, "optional null fields changed the compatibility body");
+    }
+
+    private static async Task SisuNativeTitleIdsAreCanonical()
+    {
+        foreach (var (input, expected) in new[] {
+            ("000704208617", "704208617"), ("0", "0"),
+            ("18446744073709551615", "18446744073709551615") })
+        {
+            var handler = new CaptureHandler("{}");
+            using var client = new HttpClient(handler);
+            var signer = new RecordingSigner(new { alg = "ES256" });
+            await new XboxSisuAuthRequest {
+                Profile = XboxSisuProfile.NativeContextV2, AccessToken = "synthetic-access", TitleId = input
+            }.Send(client, signer);
+            using var body = JsonDocument.Parse(handler.Body!);
+            var title = body.RootElement.GetProperty("TitleId");
+            Assert(title.ValueKind == JsonValueKind.String && title.GetString() == expected, "native SISU title ID is not canonical");
+            Assert(handler.Body == signer.Body, "canonical title ID differs between signer and transport");
+            Assert(handler.Request!.Headers.GetValues("x-xbl-contract-version").Single() == "2", "native SISU title used a nonnative contract");
+        }
+    }
+
+    private static async Task SisuNativeRejectsInvalidTitleIds()
+    {
+        foreach (var titleId in new string?[] { null, "", " ", " 704208617", "704208617 ",
+            "+704208617", "-1", "704208617.0", "704,208,617", "0x29f960e9", "1e3",
+            "18446744073709551616", "synthetic-invalid-title", "７０４２０８６１７" })
+        {
+            await AssertSisuRejectedBeforeSend(new XboxSisuAuthRequest {
+                Profile = XboxSisuProfile.NativeContextV2, AccessToken = "synthetic-access", TitleId = titleId
+            }, "invalid native SISU title ID");
+        }
+    }
+
+    private static async Task SisuOAuthRejectsNativeContext()
+    {
+        var configureFields = new Action<XboxSisuAuthRequest>[] {
+            request => request.TitleId = "704208617",
+            request => request.TitleId = "",
+            request => request.SessionId = "synthetic-session",
+            request => request.SessionId = "",
+            request => request.UcsCheckinToken = "synthetic-checkin",
+            request => request.UcsCheckinToken = "",
+            request => request.UcsWebToken = "synthetic-web",
+            request => request.UcsWebToken = "",
+            request => request.UserPrompts = new[] { "synthetic-prompt" },
+            request => request.UserPrompts = Array.Empty<string>(),
+            request => request.RequestConsent = true
+        };
+        foreach (var configure in configureFields)
+        {
+            var request = new XboxSisuAuthRequest { AccessToken = "synthetic-access" };
+            configure(request);
+            await AssertSisuRejectedBeforeSend(request, "native-only context on the OAuth compatibility profile");
+        }
+    }
+
+    private static async Task SisuOAuthRejectsCopiedContinuation()
+    {
+        foreach (var (session, cluster) in new[] {
+            ("synthetic-session", (string?)null),
+            ((string?)null, "https://cluster.sisu.xboxlive.com"),
+            ("synthetic-session", "https://cluster.sisu.xboxlive.com") })
+        {
+            using var response = SisuResponse(HttpStatusCode.OK, "{}", session, cluster);
+            var context = (await new XboxAuthResponseHandler().HandleResponse<XboxSisuResponse>(response)).Context!;
+            var request = new XboxSisuAuthRequest { AccessToken = "synthetic-access" };
+            request.ContinueFrom(context);
+            Assert(request.SessionId == session && request.ClusterAffinity == cluster, "ContinueFrom failed to copy context on the default profile");
+            await AssertSisuRejectedBeforeSend(request, "copied native continuation on the OAuth compatibility profile");
+        }
+    }
+
+    private static async Task AssertSisuRejectedBeforeSend(XboxSisuAuthRequest request, string scenario)
+    {
+        var handler = new CaptureHandler("{}");
+        using var client = new HttpClient(handler);
+        var signer = new RecordingSigner(new { alg = "ES256" });
+        try
+        {
+            await request.Send(client, signer);
+        }
+        catch (InvalidOperationException error)
+        {
+            Assert(handler.Request == null, scenario + " reached HTTP transport");
+            Assert(signer.Body == null, scenario + " reached signing");
+            foreach (var secret in new[] { request.AccessToken, request.DeviceToken, request.SessionId,
+                request.UcsCheckinToken, request.UcsWebToken })
+                if (!string.IsNullOrEmpty(secret))
+                    Assert(!error.Message.Contains(secret, StringComparison.Ordinal), "SISU preflight error exposed request context");
+            return;
+        }
+        throw new InvalidOperationException(scenario + " was accepted");
+    }
+
+    private static async Task SisuResponseModernGamertagFlags()
+    {
+        foreach (var name in new[] { "UseModernGamertag", "UseModernGamerTag" })
+        foreach (var expected in new[] { true, false })
+        {
+            var body = "{\"" + name + "\":" + (expected ? "true" : "false")
+                + ",\"UserToken\":{\"Token\":\"synthetic-user\"},\"TitleToken\":{\"Token\":\"synthetic-title\"}}";
+            using var response = SisuResponse(HttpStatusCode.OK, body);
+            var result = await new XboxAuthResponseHandler().HandleResponse<XboxSisuResponse>(response);
+            Assert(result.UseModernGamertag == expected, "SISU successful response lost the boolean gamertag flag");
+            Assert(result.UserToken?.Token == "synthetic-user" && result.TitleToken?.Token == "synthetic-title", "SISU boolean flag disrupted successful response tokens");
+            Assert(result.Context?.SessionId == "synthetic-session", "SISU boolean flag disrupted successful response context");
+            using var serialized = JsonDocument.Parse(JsonSerializer.Serialize(result));
+            Assert(serialized.RootElement.GetProperty("UseModernGamertag").GetBoolean() == expected, "SISU flag did not serialize under the canonical key");
+            Assert(!serialized.RootElement.TryGetProperty("UseModernGamerTag", out _), "legacy SISU response alias serialized a second flag");
+        }
+        using var absentResponse = SisuResponse(HttpStatusCode.OK, "{}", null, null);
+        var absent = await new XboxAuthResponseHandler().HandleResponse<XboxSisuResponse>(absentResponse);
+        Assert(absent.UseModernGamertag == null, "missing SISU gamertag flag became a boolean value");
+    }
+
+    private static async Task SisuMalformedSuccessMetadata()
+    {
+        foreach (var name in new[] { "UseModernGamertag", "UseModernGamerTag" })
+        foreach (var malformedValue in new[] { "\"synthetic-secret-ç\"", "42" })
+        {
+            const string secret = "synthetic-secret-ç";
+            var body = "{\"" + name + "\":" + malformedValue + ",\"UserToken\":{\"Token\":\"" + secret + "\"}}";
+            using var response = SisuResponse(HttpStatusCode.OK, body);
+            try
+            {
+                await new XboxAuthResponseHandler().HandleResponse<XboxSisuResponse>(response);
+            }
+            catch (XboxAuthException error)
+            {
+                Assert(error.StatusCode == 200, "malformed successful SISU response lost its HTTP status");
+                Assert(error.FailureKind == "invalid_response" && error.Error == "invalid_response", "SISU parse failure became a service error");
+                Assert(error.ResponseBodyBytes == Encoding.UTF8.GetByteCount(body), "SISU parse failure byte count is not UTF-8");
+                Assert(error.SisuContext == null, "malformed SISU success captured continuation");
+                Assert(!error.ToString().Contains(secret, StringComparison.Ordinal), "SISU parse failure exposed response token content");
+                continue;
+            }
+            throw new InvalidOperationException("nonboolean SISU response flag was accepted");
+        }
     }
 
     private static HttpResponseMessage SisuResponse(HttpStatusCode status, string body,
@@ -196,7 +384,9 @@ internal static class Program
         Assert(result.Context?.SessionId == "synthetic-session", "session header discarded");
         Assert(result.Context?.ClusterAffinity == "https://cluster.sisu.xboxlive.com", "affinity header discarded");
         Assert(!JsonSerializer.Serialize(result).Contains("synthetic-session"), "continuation leaked into response JSON");
-        var request = new XboxSisuAuthRequest { AccessToken = "access" };
+        var request = new XboxSisuAuthRequest {
+            Profile = XboxSisuProfile.NativeContextV2, AccessToken = "access", TitleId = "704208617"
+        };
         request.ContinueFrom(result.Context!);
         var transport = new CaptureHandler("{}");
         using var client = new HttpClient(transport);
@@ -254,7 +444,9 @@ internal static class Program
         using var first = SisuResponse(HttpStatusCode.OK, "{}");
         using var empty = SisuResponse(HttpStatusCode.OK, "{}", null, null);
         var parser = new XboxAuthResponseHandler();
-        var request = new XboxSisuAuthRequest { AccessToken = "access" };
+        var request = new XboxSisuAuthRequest {
+            Profile = XboxSisuProfile.NativeContextV2, AccessToken = "access", TitleId = "704208617"
+        };
         request.ContinueFrom((await parser.HandleResponse<XboxSisuResponse>(first)).Context!);
         request.ContinueFrom((await parser.HandleResponse<XboxSisuResponse>(empty)).Context!);
         Assert(request.SessionId == null && request.ClusterAffinity == null, "missing response fields reused old context");
@@ -275,7 +467,9 @@ internal static class Program
         {
             using var response = SisuResponse(HttpStatusCode.OK, "{}", "new-session", endpoint);
             var context = (await new XboxAuthResponseHandler().HandleResponse<XboxSisuResponse>(response)).Context!;
-            var request = new XboxSisuAuthRequest { SessionId = "old-session" };
+            var request = new XboxSisuAuthRequest {
+                Profile = XboxSisuProfile.NativeContextV2, TitleId = "704208617", SessionId = "old-session"
+            };
             try
             {
                 request.ContinueFrom(context);
@@ -295,6 +489,7 @@ internal static class Program
             var transport = new CaptureHandler("{}");
             using var client = new HttpClient(transport);
             await new XboxSisuAuthRequest {
+                Profile = XboxSisuProfile.NativeContextV2, TitleId = "704208617",
                 AccessToken = "access", SessionId = "", UcsCheckinToken = item.Item1,
                 UcsWebToken = item.Item2, UserPrompts = new[] { "prompt" }, RequestConsent = true
             }.Send(client, new RecordingSigner(new { alg = "ES256" }));
@@ -304,7 +499,10 @@ internal static class Program
         }
         var paired = new CaptureHandler("{}");
         using var pairedClient = new HttpClient(paired);
-        await new XboxSisuAuthRequest { AccessToken = "access", UcsCheckinToken = "c", UcsWebToken = "w" }
+        await new XboxSisuAuthRequest {
+            Profile = XboxSisuProfile.NativeContextV2, TitleId = "704208617",
+            AccessToken = "access", UcsCheckinToken = "c", UcsWebToken = "w"
+        }
             .Send(pairedClient, new RecordingSigner(new { alg = "ES256" }));
         using var pairedBody = JsonDocument.Parse(paired.Body!);
         Assert(pairedBody.RootElement.GetProperty("UserPrompts").GetArrayLength() == 0, "paired context requires prompts array");
@@ -366,6 +564,8 @@ internal static class Program
         catch (XboxAuthException ex)
         {
             Assert(ex.StatusCode == 400, "status code was not retained");
+            Assert(ex.FailureKind == "http_error", "HTTP rejection became a local decode failure");
+            Assert(ex.ResponseBodyBytes == Encoding.UTF8.GetByteCount("{\"XErr\":2148916233,\"Message\":\"synthetic\"}"), "HTTP rejection byte count changed");
             Assert(ex.Error == "8015dc09", $"numeric XErr conversion changed: {ex.Error}");
             Assert(ex.ErrorMessage == "synthetic", "error message was not retained");
         }
@@ -384,6 +584,8 @@ internal static class Program
         catch (XboxAuthException ex)
         {
             Assert(ex.StatusCode == 403, "header status code was not retained");
+            Assert(ex.FailureKind == "http_error", "header HTTP rejection became a local decode failure");
+            Assert(ex.ResponseBodyBytes == Encoding.UTF8.GetByteCount("forbidden"), "header HTTP rejection byte count changed");
             Assert(ex.Error == "8015dc09", $"header XErr conversion changed: {ex.Error}");
         }
     }
