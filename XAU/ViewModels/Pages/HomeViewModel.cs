@@ -345,7 +345,14 @@ namespace XAU.ViewModels.Pages
 
         private async Task InitializeViewModel()
         {
-            await CheckForToolUpdates();
+            // A failing update check (for example the unauthenticated GitHub API rate
+            // limit) must not abort initialization before settings and login. The CLI
+            // runner skips update checks entirely.
+            if (!CliMode)
+            {
+                try { await CheckForToolUpdates(); }
+                catch (Exception ex) { EventsLog($"Update check failed: {ex.GetType().Name}"); }
+            }
             XauthWorker.DoWork += XauthWorker_DoWork;
             XauthWorker.ProgressChanged += XauthWorker_ProgressChanged;
             XauthWorker.RunWorkerCompleted += XauthWorker_RunWorkerCompleted;
@@ -389,8 +396,11 @@ namespace XAU.ViewModels.Pages
                 }
 
             }
-            CheckForEventUpdates();
-            CheckForXboxGamesDatabaseUpdate();
+            if (!CliMode)
+            {
+                CheckForEventUpdates();
+                CheckForXboxGamesDatabaseUpdate();
+            }
             LoadSettings();
             if (Settings.OAuthLogin)
                 OAuthLogin();
@@ -1054,6 +1064,7 @@ namespace XAU.ViewModels.Pages
         // Set by the command-line runner (XAU.exe --cli ...) so a headless run
         // does not depend on settings.json.
         public static HomeViewModel? Instance;
+        public static bool CliMode;
         public static bool ForcePresenceProbe;
         public static bool ForceTitleBoundSisu;
         public static int ProbePaceMs = 1500;

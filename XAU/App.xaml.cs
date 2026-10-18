@@ -50,9 +50,12 @@ public partial class App
 
     private void OnStartup(object sender, StartupEventArgs e)
     {
+        // Must be set before the host builds the window, which starts the
+        // view-model initialization that reads it.
+        XAU.ViewModels.Pages.HomeViewModel.CliMode = XAU.Services.CliRunner.Requested(e.Args);
         Host.Start();
         SetupExceptionHandling();
-        if (XAU.Services.CliRunner.Requested(e.Args))
+        if (XAU.ViewModels.Pages.HomeViewModel.CliMode)
             XAU.Services.CliRunner.Start(e.Args);
     }
 
