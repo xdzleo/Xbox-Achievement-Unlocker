@@ -1,5 +1,4 @@
 using System.IO;
-using System.Windows;
 using XAU.ViewModels.Pages;
 
 namespace XAU.Services;
@@ -67,7 +66,7 @@ public static class CliRunner
                 {
                     triedLogin = true;
                     HomeViewModel.EventsLog("CLI: starting the saved-session OAuth login");
-                    await Application.Current.Dispatcher.InvokeAsync(() => HomeViewModel.Instance.CliOAuthLogin());
+                    await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => HomeViewModel.Instance.CliOAuthLogin());
                 }
                 await Task.Delay(500);
             }
@@ -125,7 +124,7 @@ public static class CliRunner
         {
             HomeViewModel.EventsLog("CLI done");
             if (exit)
-                await Application.Current.Dispatcher.InvokeAsync(() => Application.Current.Shutdown());
+                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => System.Windows.Application.Current.Shutdown());
         }
     }
 
