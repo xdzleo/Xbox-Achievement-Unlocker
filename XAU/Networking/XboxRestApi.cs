@@ -135,12 +135,10 @@ public class XboxRestAPI
         // requested title, a 200 would only mark the token's own title (for
         // OAuth, the Xbox App client) active, so do not send it as if it were
         // the requested title.
+        // Only recorded, never used to skip the write: that the token carries
+        // only another title is an inference, not an observation. The
+        // read-back decides.
         var binding = PresenceVerification.ClassifyStateOnlyWrite(_presenceTokenTitleId, titleId);
-        if (binding == PresenceVerification.StateOnlyBinding.Mismatch)
-        {
-            HomeViewModel.EventsLog($"Presence POST skipped: state-only body binds to token title {(_presenceTokenTitleId ?? "none")}, requested {titleId}");
-            return false;
-        }
 
         try
         {
@@ -160,6 +158,58 @@ public class XboxRestAPI
         {
             HomeViewModel.EventsLog($"Presence POST transport failure: {ex.GetType().Name}");
             return false;
+        }
+    }
+
+    // Runs PresenceProbePlan with this instance's token. Every step uses a
+    // fresh client and the same explicit headers, so two runs with different
+    // tokens differ only in Authorization/Signature. Logs status, error code,
+    // body size and numeric title ids; never bodies, tokens or signatures.
+    public async Task ProbePresenceAsync(string xuid, string titleId, string label)
+    {
+        var plan = PresenceProbePlan.Build(xuid, titleId, _presenceSigner != null);
+        if (plan.Count == 0)
+        {
+            HomeViewModel.EventsLog($"Probe[{label}] skipped: invalid xuid or title id");
+            return;
+        }
+
+        using var client = new HttpClient(new HttpClientHandler
+        {
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+        });
+        foreach (var step in plan)
+        {
+            using var request = new HttpRequestMessage(new HttpMethod(step.Method), step.Url);
+            request.Headers.TryAddWithoutValidation(HeaderNames.Authorization, _xauth);
+            request.Headers.TryAddWithoutValidation(HeaderNames.ContractVersion, HeaderValues.ContractVersion3);
+            request.Headers.TryAddWithoutValidation(HeaderNames.AcceptLanguage, _requestedResponseLanguage);
+            request.Headers.TryAddWithoutValidation(HeaderNames.Accept, HeaderValues.Accept);
+            if (step.Body != null)
+                request.Content = new StringContent(step.Body, Encoding.UTF8, HeaderValues.Accept);
+            if (step.Signed && _presenceSigner != null)
+                request.Headers.TryAddWithoutValidation(HeaderNames.Signature,
+                    _presenceSigner.SignServiceRequest(step.Method, step.Url, _xauth, step.Body ?? ""));
+
+            try
+            {
+                using var response = await client.SendAsync(request);
+                var summary = await DescribeFailureAsync(response);
+                if (step.IsReadback && response.IsSuccessStatusCode)
+                {
+                    var result = PresenceVerification.ParseReadback(await response.Content.ReadAsStringAsync(), titleId);
+                    var active = result.ActiveTitleIds.Count == 0 ? "none" : string.Join(",", result.ActiveTitleIds);
+                    HomeViewModel.EventsLog($"Probe[{label}] {step.Name} => {(int)response.StatusCode}; parsed={result.Parsed}; requested_active={result.RequestedTitleActive}; titles={result.TitleCount}; active_ids={active}");
+                }
+                else
+                {
+                    HomeViewModel.EventsLog($"Probe[{label}] {step.Name} => {(int)response.StatusCode} {response.StatusCode}; {summary}");
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                HomeViewModel.EventsLog($"Probe[{label}] {step.Name} transport failure: {ex.GetType().Name}");
+            }
         }
     }
 

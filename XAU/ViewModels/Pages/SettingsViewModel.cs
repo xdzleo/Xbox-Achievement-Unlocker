@@ -57,7 +57,8 @@ namespace XAU.ViewModels.Pages
                 PrivacyMode = PrivacyMode,
                 OAuthLogin = OAuthLogin,
                 AutoGrabEventsToken = AutoGrabEventsToken,
-                TitleBoundSisuExperiment = HomeViewModel.Settings.TitleBoundSisuExperiment
+                TitleBoundSisuExperiment = HomeViewModel.Settings.TitleBoundSisuExperiment,
+                PresenceProbe = HomeViewModel.Settings.PresenceProbe
             };
             string settingsJson = JsonConvert.SerializeObject(settings);
             File.WriteAllText(SettingsFilePath, settingsJson);

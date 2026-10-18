@@ -1,5 +1,42 @@
 # OAuth presence fix
 
+## Controlled comparison probe (v0.1.12, opt-in diagnostic, OFF by default)
+
+Three statements earlier in this document are **hypotheses, not findings**:
+(1) the token read from the Xbox App carries a specific "presence permission"
+claim; (2) the OAuth token necessarily carries only the Xbox App title;
+(3) the difference comes exclusively from the token. The tokens are JWE
+(`alg=RSA-OAEP`, `enc=A128CBC-HS256`), so no claim can be read client-side;
+the only observable is the service response. Request shape, headers, device
+identity and session state must be equalized before a difference can be
+attributed to the token.
+
+Changes:
+
+- The v0.1.10 rule that skipped the state-only POST when the token title was
+  known and different was removed. It rested on hypothesis (2). The binding is
+  only logged (`binding=Bound|Mismatch|Unknown`); the read-back decides.
+- `PresenceProbePlan` (offline-tested) is a fixed matrix with no token input:
+  a read-back, then for each of four write variants (legacy heartbeat with
+  string id, legacy heartbeat with numeric id as in upstream 2022,
+  current-title `{"state":"active"}`, current-title `{id,state,placement}`) the
+  write followed by a read-back; repeated with `Signature` when the token is
+  bound to a ProofKey XAU holds. Headers are identical for every step and
+  token (Authorization, `x-xbl-contract-version: 3`, Accept-Language, Accept).
+- Enable with `"PresenceProbe": true` in `Documents\XAU\settings.json` or
+  `XAU_PRESENCE_PROBE=1`. It runs once per (token set, title) when spoofing
+  starts and logs `Probe context`, `Probe token[...]` (length, segments, x5t,
+  fingerprint, signer, title claim) and one line per step (status, error code,
+  numeric active title ids). It never logs bodies, tokens or signatures.
+
+How to use: run it once with the Xbox App token (OAuth login off, Xbox App
+open) and once with the OAuth login, same game, and compare the two logs
+step by step. Context lines record whether the Xbox App process is running
+and whether OAuth login is on, because session state is one of the
+uncontrolled variables. Device identity (the device token behind each XToken)
+is another candidate that this probe cannot observe and that is not excluded.
+
+
 ## Experiment: title-bound SISU (v0.1.11, opt-in, OFF by default)
 
 **Observation (v0.1.10 log, 2026-10-18 16:27-16:28).** With the request

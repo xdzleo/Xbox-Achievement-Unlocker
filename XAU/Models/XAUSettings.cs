@@ -15,6 +15,9 @@ public class XAUSettings
     // Experimental, off by default: ask SISU (contract 2) for the chosen title
     // before presence writes. Has no UI; set in settings.json or XAU_TITLE_BOUND_SISU=1.
     public bool TitleBoundSisuExperiment { get; set; }
+    // Diagnostic, off by default: send the identical presence request matrix with
+    // every token and log the responses. No UI; settings.json or XAU_PRESENCE_PROBE=1.
+    public bool PresenceProbe { get; set; }
     public string? CachedEventsToken { get; set; }
     public DateTime? EventsTokenObtainedAt { get; set; }
     public string? EventsUserHash { get; set; }

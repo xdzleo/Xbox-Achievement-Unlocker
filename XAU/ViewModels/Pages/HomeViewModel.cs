@@ -112,6 +112,10 @@ namespace XAU.ViewModels.Pages
         // Set after an OAuth login; callers invoke it before the first presence
         // write for a chosen title. Null when no OAuth session is active.
         public static Func<string, Task>? PrepareTitleBoundPresence;
+        // ProofKey signer behind the SISU AuthorizationToken (XAUTH) after an
+        // OAuth login; null for tokens read from process memory.
+        public static XboxAuthNet.XboxLive.Crypto.XboxRequestSigner? OAuthProofSigner;
+        private static readonly HashSet<string> _probedKeys = new();
         // In-memory only; never written to disk or the event log.
         private string? _titleSisuAccessToken;
         private string? _titleSisuDeviceToken;
@@ -512,6 +516,7 @@ namespace XAU.ViewModels.Pages
                 PresenceXAUTH = mostCommon;
                 PresenceTitleId = "";
                 PresenceSigner = null;
+                OAuthProofSigner = null;
                 EventsLog($"Memory XAUTH metadata: {DescribeXauthMetadata(mostCommon)}");
                 XAUTHTested = false;
             }
@@ -1000,6 +1005,7 @@ namespace XAU.ViewModels.Pages
                 }
 
                 XAUTH = $"XBL3.0 x={authorizationToken.XuiClaims.UserHash};{authorizationToken.Token}";
+                OAuthProofSigner = xboxSignedClient.Signer as XboxAuthNet.XboxLive.Crypto.XboxRequestSigner;
                 EventsLog($"OAuth normal XAUTH metadata: {DescribeXauthMetadata(XAUTH)}");
                 stage = "presence-xsts";
                 PresenceTitleId = "";
@@ -1042,6 +1048,47 @@ namespace XAU.ViewModels.Pages
             // Start the events token worker to periodically check/refresh the token
             if (Settings.AutoGrabEventsToken && !EventsTokenWorker.IsBusy)
                 EventsTokenWorker.RunWorkerAsync();
+        }
+
+        private static bool PresenceProbeEnabled() =>
+            Settings.PresenceProbe
+            || Environment.GetEnvironmentVariable("XAU_PRESENCE_PROBE") == "1";
+
+        // DIAGNOSTIC (opt-in, off by default). Sends the identical PresenceProbePlan
+        // to every distinct token the app holds and logs only status codes, error
+        // codes and numeric title ids. Run it once with the token read from the
+        // Xbox App process and once with the OAuth login, then compare the two
+        // logs: requests and session state are equal, so a difference is
+        // attributable to the token (or to a state line in the context record).
+        public static async Task RunPresenceProbeAsync(string titleId)
+        {
+            if (!PresenceProbeEnabled())
+                return;
+            if (!PresenceVerification.TryCanonicalTitleId(titleId, out var numericTitle) || string.IsNullOrEmpty(XUIDOnly))
+                return;
+            var canonicalTitle = numericTitle.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+            var candidates = new List<(string Label, string Token, XboxAuthNet.XboxLive.Crypto.XboxRequestSigner? Signer, string TitleClaim)>();
+            if (!string.IsNullOrWhiteSpace(XAUTH))
+                candidates.Add(("xauth", XAUTH, OAuthProofSigner, ""));
+            if (!string.IsNullOrWhiteSpace(PresenceXAUTH) && PresenceXAUTH != XAUTH)
+                candidates.Add(("presence-xsts", PresenceXAUTH, PresenceSigner, PresenceTitleId));
+            var key = $"{canonicalTitle}|{string.Join("|", candidates.Select(c => c.Token.GetHashCode()))}";
+            if (!_probedKeys.Add(key))
+                return;
+
+            bool appRunning;
+            try { appRunning = Process.GetProcessesByName("XboxPcApp").Length > 0; }
+            catch { appRunning = false; }
+            EventsLog($"Probe context: title={canonicalTitle}; oauth_login={Settings.OAuthLogin}; xbox_app_running={appRunning}; tokens={candidates.Count}; title_bound_experiment={TitleBoundSisuEnabled()}");
+
+            foreach (var candidate in candidates)
+            {
+                EventsLog($"Probe token[{candidate.Label}]: {DescribeXauthMetadata(candidate.Token)}; signer={(candidate.Signer != null)}; title_claim={(string.IsNullOrWhiteSpace(candidate.TitleClaim) ? "none" : candidate.TitleClaim)}");
+                await new XboxRestAPI(candidate.Token, presenceTokenTitleId: candidate.TitleClaim, presenceSigner: candidate.Signer)
+                    .ProbePresenceAsync(XUIDOnly, canonicalTitle, candidate.Label);
+            }
+            EventsLog("Probe finished");
         }
 
         private static bool TitleBoundSisuEnabled() =>
@@ -1297,6 +1344,7 @@ namespace XAU.ViewModels.Pages
             XAUTH = "";
             PresenceXAUTH = "";
             PrepareTitleBoundPresence = null;
+            OAuthProofSigner = null;
             _titleSisuAccessToken = null;
             _titleSisuDeviceToken = null;
             XUIDOnly = "";

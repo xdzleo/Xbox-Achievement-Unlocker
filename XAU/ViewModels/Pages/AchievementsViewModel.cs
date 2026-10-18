@@ -215,9 +215,10 @@ namespace XAU.ViewModels.Pages
 
         public async Task Spoofing()
         {
-            // Opt-in experiment; no-op unless enabled (see HomeViewModel).
+            // Opt-in experiment and diagnostic; no-ops unless enabled (see HomeViewModel).
             if (HomeViewModel.PrepareTitleBoundPresence != null)
                 await HomeViewModel.PrepareTitleBoundPresence(HomeViewModel.AutoSpoofedTitleID);
+            await HomeViewModel.RunPresenceProbeAsync(HomeViewModel.AutoSpoofedTitleID);
             await PresenceApi().SendHeartbeatAsync(HomeViewModel.XUIDOnly, HomeViewModel.AutoSpoofedTitleID);
             var i = 0;
             Thread.Sleep(1000);

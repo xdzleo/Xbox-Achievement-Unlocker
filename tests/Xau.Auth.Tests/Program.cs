@@ -43,6 +43,8 @@ internal static class Program
         await Run("state-only presence write is bound only to the token title", StateOnlyPresenceBindsToTokenTitle);
         await Run("presence readback confirms only the requested active title", PresenceReadbackConfirmsRequestedTitle);
         await Run("presence readback rejects malformed or foreign bodies", PresenceReadbackRejectsMalformed);
+        await Run("presence probe plan is identical for every token and has exact wire bodies", PresenceProbePlanIsTokenIndependent);
+        await Run("presence probe plan adds signed steps only with a signer and rejects bad input", PresenceProbePlanSignedAndInvalid);
         await Run("title-bound SISU experiment request: contract 2, TitleId, no UCS/session context", TitleBoundSisuExperimentRequest);
         await Run("title-bound SISU experiment never falls back to OAuth contract or empty title", TitleBoundSisuExperimentRejectsBadTitle);
         await Run("service signature covers method, path+query, Authorization and body", ServiceSignatureCoversRequest);
@@ -113,6 +115,54 @@ internal static class Program
             Assert(!result.RequestedTitleActive, $"body {body ?? "null"} must not confirm presence");
         }
         Assert(!PresenceVerification.ParseReadback("{\"devices\":[]}", "0").Parsed, "invalid requested title is not parsed");
+        return Task.CompletedTask;
+    }
+
+    private static Task PresenceProbePlanIsTokenIndependent()
+    {
+        // The plan has no token input at all: two runs (memory token, OAuth
+        // token) cannot differ in request shape.
+        var a = PresenceProbePlan.Build("2535400000000000", "0374923716", false);
+        var b = PresenceProbePlan.Build("2535400000000000", "374923716", false);
+        Assert(a.SequenceEqual(b), "equal xuid/title must give identical steps regardless of title spelling");
+
+        var names = a.Select(s => s.Name).ToArray();
+        Assert(names.SequenceEqual(new[] {
+            "readback-before/unsigned",
+            "heartbeat-string-id/unsigned", "readback-after-heartbeat-string-id/unsigned",
+            "heartbeat-numeric-id/unsigned", "readback-after-heartbeat-numeric-id/unsigned",
+            "current-title-state-only/unsigned", "readback-after-current-title-state-only/unsigned",
+            "current-title-id-placement/unsigned", "readback-after-current-title-id-placement/unsigned" }), "probe step order changed");
+
+        var byName = a.ToDictionary(s => s.Name);
+        const string hb = "https://presence-heartbeat.xboxlive.com/users/xuid(2535400000000000)/devices/current/";
+        const string ct = "https://userpresence.xboxlive.com/users/xuid(2535400000000000)/devices/current/titles/current";
+        const string rd = "https://userpresence.xboxlive.com/users/xuid(2535400000000000)?level=all";
+        Assert(byName["heartbeat-string-id/unsigned"].Url == hb && byName["heartbeat-string-id/unsigned"].Method == "POST", "heartbeat url/method");
+        Assert(byName["heartbeat-string-id/unsigned"].Body == "{\"titles\":[{\"expiration\":600,\"id\":\"374923716\",\"state\":\"active\",\"sandbox\":\"RETAIL\"}]}", "legacy string-id body");
+        Assert(byName["heartbeat-numeric-id/unsigned"].Body == "{\"titles\":[{\"expiration\":600,\"id\":374923716,\"state\":\"active\",\"sandbox\":\"RETAIL\"}]}", "legacy numeric-id body (upstream 2022 wire)");
+        Assert(byName["current-title-state-only/unsigned"].Url == ct && byName["current-title-state-only/unsigned"].Body == "{\"state\":\"active\"}", "native state-only body");
+        Assert(byName["current-title-id-placement/unsigned"].Body == "{\"id\":\"374923716\",\"state\":\"active\",\"placement\":\"full\"}", "id/placement body");
+        foreach (var step in a.Where(s => s.IsReadback))
+            Assert(step.Method == "GET" && step.Url == rd && step.Body == null, "readback must be a bodyless GET of level=all");
+        foreach (var step in a.Where(s => !s.IsReadback))
+            using (var doc = JsonDocument.Parse(step.Body!)) Assert(doc.RootElement.ValueKind == JsonValueKind.Object, "probe bodies must be JSON objects");
+        return Task.CompletedTask;
+    }
+
+    private static Task PresenceProbePlanSignedAndInvalid()
+    {
+        var unsigned = PresenceProbePlan.Build("1", "704208617", false);
+        var signed = PresenceProbePlan.Build("1", "704208617", true);
+        Assert(unsigned.All(s => !s.Signed), "no signer means no signed steps");
+        Assert(signed.Count == 1 + 2 * (unsigned.Count - 1), "signer duplicates every write+readback pair once");
+        Assert(signed.Where(s => s.Signed).Select(s => s.Name.Replace("/signed", "")).SequenceEqual(
+            unsigned.Skip(1).Select(s => s.Name.Replace("/unsigned", ""))), "signed steps mirror the unsigned ones one to one");
+        Assert(signed.Take(unsigned.Count).SequenceEqual(unsigned), "unsigned steps come first, unchanged");
+
+        foreach (var bad in new[] { ("", "704208617"), ("abc", "704208617"), ("1", ""), ("1", "0"), ("1", "x"), ("1", "-5") })
+            Assert(PresenceProbePlan.Build(bad.Item1, bad.Item2, true).Count == 0, $"invalid input {bad} must give an empty plan");
+        Assert(PresenceProbePlan.Build(null, "704208617", false).Count == 0, "null xuid gives an empty plan");
         return Task.CompletedTask;
     }
 
