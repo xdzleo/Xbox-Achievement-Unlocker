@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <Compile Include="../../XAU/Services/OAuthSessionStore.cs" Link="Source/OAuthSessionStore.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/OAuth/OAuthSessionRenewal.cs" Link="Source/OAuthSessionRenewal.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/OAuth/MicrosoftOAuthResponse.cs" Link="Source/MicrosoftOAuthResponse.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/OAuth/MicrosoftOAuthException.cs" Link="Source/MicrosoftOAuthException.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/OAuth/MicrosoftUserPayload.cs" Link="Source/MicrosoftUserPayload.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/Jwt/JwtDecoder.cs" Link="Source/JwtDecoder.cs" />
+  </ItemGroup>
+</Project>

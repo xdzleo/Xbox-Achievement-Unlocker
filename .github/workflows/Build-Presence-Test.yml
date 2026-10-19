@@ -27,6 +27,15 @@ jobs:
       - name: Run offline XboxAuthNet contract tests
         run: dotnet run --project tests/Xau.Auth.Tests/Xau.Auth.Tests.csproj -c Release
 
+      - name: Run offline DeviceRPS contract tests
+        run: dotnet run --project tests/Xau.DeviceRps.Tests/Xau.DeviceRps.Tests.csproj -c Release
+
+      - name: Compile public Windows OnlineId backend without activation
+        run: dotnet build tests/Xau.DeviceRps.Windows.Compile/Xau.DeviceRps.Windows.Compile.csproj -c Release
+
+      - name: Run synthetic OAuth session lifecycle tests
+        run: dotnet run --project tests/Xau.OAuth.Session.Tests/Xau.OAuth.Session.Tests.csproj -c Release
+
       - name: Publish test build
         run: dotnet publish XAU.sln -c Release -r win-x64 --self-contained false /p:PublishSingleFile=true /p:PublishReadyToRun=false /p:IncludeAllContentForSelfExtract=true /p:EnableWindowsTargeting=true -o ./presence-test-publish
 

@@ -6,8 +6,20 @@ using XboxAuthNet.XboxLive.Responses;
 
 namespace XboxAuthNet.XboxLive.Requests
 {
+    public enum XboxDeviceAuthenticationMethod
+    {
+        ProofOfPossession = 0,
+        DeviceRps = 1
+    }
+
     public class XboxDeviceTokenRequest : AbstractXboxSignedAuthRequest
     {
+        // DeviceRps is an explicit alternative to the legacy/NativeWin32 PoP profiles.
+        // An OnlineId system ticket is not an OAuth user token or a device JWT.
+        public XboxDeviceAuthenticationMethod AuthenticationMethod { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        [System.Runtime.Serialization.IgnoreDataMember]
+        public string? RpsTicket { get; set; }
         public string? Id { get; set; }
         public string? SerialNumber { get; set; }
         public string? DeviceType { get; set; }
@@ -21,6 +33,37 @@ namespace XboxAuthNet.XboxLive.Requests
         protected override string RequestUrl => "https://device.auth.xboxlive.com/device/authenticate";
         protected override object BuildBody(object proofKey)
         {
+            if (AuthenticationMethod == XboxDeviceAuthenticationMethod.DeviceRps)
+            {
+                if (NativeWin32Profile || Id != null || SerialNumber != null || DeviceType != null)
+                    throw new InvalidOperationException("Device RPS does not accept anonymous device identity fields");
+                if (string.IsNullOrEmpty(RpsTicket))
+                    throw new InvalidOperationException("Device RPS requires a system service ticket");
+                if (string.IsNullOrEmpty(RelyingParty))
+                    throw new InvalidOperationException("RelyingParty was null");
+                if (proofKey == null)
+                    throw new InvalidOperationException("Device RPS requires a proof key");
+                var properties = new System.Collections.Generic.Dictionary<string, object?>
+                {
+                    ["AuthMethod"] = "RPS",
+                    // Preserve the credential exactly, including any existing t=/d= prefix.
+                    ["RpsTicket"] = RpsTicket,
+                    ["SiteName"] = "user.auth.xboxlive.com"
+                };
+                if (!string.IsNullOrEmpty(DeviceVersion))
+                    properties["Version"] = DeviceVersion;
+                properties["ProofKey"] = proofKey;
+                return new System.Collections.Generic.Dictionary<string, object?>
+                {
+                    ["RelyingParty"] = RelyingParty,
+                    ["TokenType"] = "JWT",
+                    ["Properties"] = properties
+                };
+            }
+            if (AuthenticationMethod != XboxDeviceAuthenticationMethod.ProofOfPossession)
+                throw new InvalidOperationException("Unsupported device authentication method");
+            if (RpsTicket != null)
+                throw new InvalidOperationException("A system service ticket requires the Device RPS method");
             if (string.IsNullOrEmpty(DeviceType))
                 throw new InvalidOperationException("DeviceType was null");
             if (string.IsNullOrEmpty(DeviceVersion))

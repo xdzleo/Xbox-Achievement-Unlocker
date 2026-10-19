@@ -2,7 +2,8 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net9.0-windows</TargetFramework>
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -45,6 +46,7 @@
 
   <ItemGroup>
     <Folder Include="Util\XboxAuthNet\Platforms\" />
+    <Compile Remove="Util\XboxAuthNet\obj\**;Util\XboxAuthNet\bin\**" />
   </ItemGroup>
 
 </Project>

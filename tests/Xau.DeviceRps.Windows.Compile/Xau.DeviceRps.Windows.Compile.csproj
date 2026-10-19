@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../XAU/Util/XboxAuthNet/XboxLive/DeviceRps/IDeviceRpsTicketProvider.cs" Link="Source/IDeviceRpsTicketProvider.cs" />
+    <Compile Include="../../XAU/Util/XboxAuthNet/Platforms/WindowsOnlineId/OnlineIdSystemTicketProvider.cs" Link="Source/OnlineIdSystemTicketProvider.cs" />
+  </ItemGroup>
+</Project>

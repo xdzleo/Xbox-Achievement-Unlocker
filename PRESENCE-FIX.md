@@ -1,5 +1,42 @@
 # OAuth presence fix
 
+## DeviceRPS support and session renewal (2026-10-18)
+
+Game presence after OAuth is **still unresolved**. A separate, reviewed experiment
+using this project's own application GUID acquired an OnlineId system ticket and
+received HTTP 200 with a nonempty Device Token from `device/authenticate`.
+It did not call OAuth, SISU, XSTS or presence. A Device Token is not evidence of
+game authorization or equivalence with the Xbox App token.
+
+`DeviceRpsTokenProvider` now implements that device exchange as an explicit
+alternative for callers. `OnlineIdSystemTicketProvider` uses the real public
+Windows API; ticket acquisition and HTTP transport are replaceable for offline
+tests. The RPS body preserves the opaque system ticket and omits the anonymous
+PoP identity fields. The caller must retain the same signer for subsequent Xbox
+requests. The existing login still selects its previous device path; this change
+does not silently enable a presence experiment.
+
+The OAuth session lifecycle is also corrected: an expired access token no longer
+causes a usable refresh credential to be deleted. Renewal preserves an omitted
+refresh token, persists rotation before Xbox requests, and serializes cooperating
+login attempts. Session writes retain the existing Newtonsoft/XAU1/DPAPI
+CurrentUser format and replace the encrypted file atomically. A failed save
+stops login; a complete protected recovery envelope is retained when replacement
+fails. Older XAU processes do not honor the new lock and must not run concurrently
+with a controlled refresh experiment.
+
+The Windows SDK target is now Windows 10 build 19041 to compile the OnlineId
+backend. CI runs the existing 41 contract cases, 14 DeviceRPS test groups, 14
+synthetic OAuth session cases and a backend compilation without API activation.
+These checks use fake credentials/transports and do not establish live presence.
+There is no new test release for this change.
+
+Native GamingServices analysis additionally traces `WebTokenRequest` construction
+from provider, scopes and client ID, `api-version=2.0`, WebAccount selection and
+response parsing. The stored account ID is an MSA ID, not a demonstrated Xbox
+XUID or an import mechanism for external OAuth tokens. The precise bridge from
+the XAU OAuth account/device context to heartbeat authorization remains open.
+
 ## Correction and native device token (v0.1.16)
 
 **Retracted inference.** The previous section attributed `Active Device: iOS`
